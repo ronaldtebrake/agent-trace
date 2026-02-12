@@ -109,7 +109,9 @@ function main() {
   // Commit 2: Stripe webhook
   let commitSha2: string | undefined;
   try {
-    writeFileSync(join(root, "src/api/webhooks/stripe.ts"), "// Stripe webhook handler");
+    const webhookPath = join(root, "src/api/webhooks/stripe.ts");
+    mkdirSync(join(webhookPath, ".."), { recursive: true });
+    writeFileSync(webhookPath, "// Stripe webhook handler");
     execSync("git add src/api/webhooks/stripe.ts", { cwd: root, stdio: "ignore" });
     execSync('git commit -m "Fix Stripe webhook bug (PAY-291)"', {
       cwd: root,
@@ -130,7 +132,9 @@ function main() {
   // Commit 3: Analytics dashboard
   let commitSha3: string | undefined;
   try {
-    writeFileSync(join(root, "src/components/dashboard/Analytics.tsx"), "// Analytics component");
+    const analyticsPath = join(root, "src/components/dashboard/Analytics.tsx");
+    mkdirSync(join(analyticsPath, ".."), { recursive: true });
+    writeFileSync(analyticsPath, "// Analytics component");
     execSync("git add src/components/dashboard/Analytics.tsx", {
       cwd: root,
       stdio: "ignore",
