@@ -8,7 +8,8 @@
     "agent-trace": "./dist/cli/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run copy-dashboard",
+    "copy-dashboard": "mkdir -p dist/dashboard/public && cp src/dashboard/public/index.html dist/dashboard/public/ 2>/dev/null || true",
     "dev": "tsx src/cli/index.ts",
     "prepare": "npm run build && node dist/setup/install-hooks.js",
     "test": "echo 'Tests coming soon'",
@@ -40,6 +41,7 @@
   },
   "files": [
     "dist",
+    "src/dashboard/public",
     "README.md"
   ]
 }

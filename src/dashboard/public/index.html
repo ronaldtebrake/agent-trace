@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Trace Dashboard</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .header {
+      background: #1a1a1a;
+      border-bottom: 1px solid #2a2a2a;
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+
+    .stats {
+      display: flex;
+      gap: 1.5rem;
+      padding: 1rem 2rem;
+      background: #151515;
+      border-bottom: 1px solid #2a2a2a;
+    }
+
+    .stat-card {
+      flex: 1;
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 1rem;
+    }
+
+    .stat-label {
+      font-size: 0.875rem;
+      color: #888;
+      margin-bottom: 0.5rem;
+    }
+
+    .stat-value {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .main-content {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .sidebar {
+      width: 320px;
+      background: #151515;
+      border-right: 1px solid #2a2a2a;
+      overflow-y: auto;
+      padding: 1rem;
+    }
+
+    .sidebar h2 {
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 1rem;
+      letter-spacing: 0.05em;
+    }
+
+    .trace-item {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      padding: 1rem;
+      margin-bottom: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .trace-item:hover {
+      background: #1f1f1f;
+      border-color: #3a3a3a;
+    }
+
+    .trace-item.active {
+      background: #252525;
+      border-color: #4a9eff;
+    }
+
+    .trace-title {
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #fff;
+    }
+
+    .trace-meta {
+      font-size: 0.75rem;
+      color: #888;
+      margin-bottom: 0.5rem;
+    }
+
+    .trace-badges {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-top: 0.5rem;
+    }
+
+    .badge {
+      font-size: 0.7rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      background: #2a2a2a;
+      color: #aaa;
+    }
+
+    .badge.claude {
+      background: #d97706;
+      color: #fff;
+    }
+
+    .badge.gpt {
+      background: #059669;
+      color: #fff;
+    }
+
+    .badge.o3 {
+      background: #7c3aed;
+      color: #fff;
+    }
+
+    .content-area {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+    }
+
+    .code-view {
+      flex: 1;
+      background: #0f0f0f;
+      overflow-y: auto;
+      padding: 2rem;
+    }
+
+    .code-file {
+      margin-bottom: 2rem;
+    }
+
+    .code-file-header {
+      font-size: 0.875rem;
+      color: #666;
+      margin-bottom: 0.5rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid #2a2a2a;
+    }
+
+    .code-block {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .code-line {
+      display: flex;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 0.875rem;
+      line-height: 1.6;
+    }
+
+    .line-number {
+      width: 3rem;
+      padding: 0 1rem;
+      text-align: right;
+      color: #555;
+      user-select: none;
+      border-right: 1px solid #2a2a2a;
+    }
+
+    .line-content {
+      flex: 1;
+      padding: 0 1rem;
+      color: #e0e0e0;
+    }
+
+    .line-attribution {
+      width: 200px;
+      padding: 0 1rem;
+      text-align: right;
+      font-size: 0.75rem;
+      color: #888;
+      border-left: 1px solid #2a2a2a;
+    }
+
+    .line-attribution.claude {
+      color: #d97706;
+    }
+
+    .line-attribution.gpt {
+      color: #059669;
+    }
+
+    .details-panel {
+      width: 400px;
+      background: #151515;
+      border-left: 1px solid #2a2a2a;
+      overflow-y: auto;
+      padding: 1.5rem;
+    }
+
+    .details-section {
+      margin-bottom: 2rem;
+    }
+
+    .details-section h3 {
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 1rem;
+      letter-spacing: 0.05em;
+    }
+
+    .details-item {
+      margin-bottom: 0.75rem;
+    }
+
+    .details-label {
+      font-size: 0.75rem;
+      color: #888;
+      margin-bottom: 0.25rem;
+    }
+
+    .details-value {
+      font-size: 0.875rem;
+      color: #e0e0e0;
+    }
+
+    .attribution-chart {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+
+    .attribution-bar {
+      height: 8px;
+      border-radius: 4px;
+    }
+
+    .attribution-bar.ai {
+      background: #8b5cf6;
+    }
+
+    .attribution-bar.mixed {
+      background: #f59e0b;
+    }
+
+    .attribution-bar.human {
+      background: #10b981;
+    }
+
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Agent Trace Dashboard</h1>
+    <div style="font-size: 0.875rem; color: #666;">v0.1.0</div>
+  </div>
+
+  <div class="stats" id="stats">
+    <div class="stat-card">
+      <div class="stat-label">Files Traced</div>
+      <div class="stat-value" id="stat-files">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Conversations</div>
+      <div class="stat-value" id="stat-conversations">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Models Used</div>
+      <div class="stat-value" id="stat-models">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Lines Attributed</div>
+      <div class="stat-value" id="stat-lines">-</div>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <div class="sidebar">
+      <h2>Trace Records</h2>
+      <div id="trace-list"></div>
+    </div>
+
+    <div class="content-area">
+      <div class="code-view" id="code-view">
+        <div class="loading">Select a trace record to view details</div>
+      </div>
+
+      <div class="details-panel" id="details-panel">
+        <div class="loading">Select a trace record to view details</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:3000/api';
+
+    let traces = [];
+    let selectedTrace = null;
+
+    async function loadStats() {
+      try {
+        const res = await fetch(`${API_BASE}/stats`);
+        const stats = await res.json();
+        
+        document.getElementById('stat-files').textContent = stats.totalFiles || 0;
+        document.getElementById('stat-conversations').textContent = stats.totalTraces || 0;
+        document.getElementById('stat-models').textContent = Object.keys(stats.models || {}).length;
+        document.getElementById('stat-lines').textContent = 
+          (stats.aiContributions || 0) + (stats.humanContributions || 0) + (stats.mixedContributions || 0);
+      } catch (error) {
+        console.error('Failed to load stats:', error);
+      }
+    }
+
+    async function loadTraces() {
+      try {
+        const res = await fetch(`${API_BASE}/stats`);
+        const stats = await res.json();
+        
+        if (stats.commits && stats.commits.length > 0) {
+          // Load traces for each commit
+          const tracePromises = stats.commits.map(async (commit) => {
+            const traceRes = await fetch(`${API_BASE}/commits/${commit.sha}/traces`);
+            return await traceRes.json();
+          });
+          
+          const traceArrays = await Promise.all(tracePromises);
+          traces = traceArrays.flat();
+        }
+        
+        renderTraceList();
+      } catch (error) {
+        console.error('Failed to load traces:', error);
+        // Fallback to demo data
+        loadDemoData();
+      }
+    }
+
+    function loadDemoData() {
+      // Demo data for testing
+      traces = [
+        {
+          id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+          timestamp: '2026-01-23T06:30:00Z',
+          vcs: { revision: '8a4f2b1c9d3e...' },
+          tool: { name: 'cursor', version: '2.4.1' },
+          files: [
+            { path: 'src/api/auth/middleware.ts', conversations: [
+              { contributor: { type: 'ai', model_id: 'anthropic/claude-sonnet-4-20250514' }, ranges: [{ start_line: 1, end_line: 150 }] }
+            ]},
+            { path: 'src/api/auth/jwt.ts', conversations: [
+              { contributor: { type: 'ai', model_id: 'openai/gpt-4o' }, ranges: [{ start_line: 1, end_line: 120 }] }
+            ]},
+            { path: 'src/api/auth/__tests__/middleware.test.ts', conversations: [
+              { contributor: { type: 'ai', model_id: 'anthropic/claude-sonnet-4-20250514' }, ranges: [{ start_line: 1, end_line: 60 }] }
+            ]}
+          ],
+          metadata: { scenario: 'Auth Middleware Refactor', confidence: 0.97 }
+        }
+      ];
+      renderTraceList();
+    }
+
+    function renderTraceList() {
+      const listEl = document.getElementById('trace-list');
+      listEl.innerHTML = '';
+
+      traces.forEach((trace, index) => {
+        const item = document.createElement('div');
+        item.className = 'trace-item';
+        if (selectedTrace === trace) {
+          item.classList.add('active');
+        }
+        
+        const date = new Date(trace.timestamp);
+        const title = trace.metadata?.scenario || `Trace ${index + 1}`;
+        const fileCount = trace.files?.length || 0;
+        const models = new Set();
+        trace.files?.forEach(f => {
+          f.conversations?.forEach(c => {
+            if (c.contributor?.model_id) models.add(c.contributor.model_id);
+          });
+        });
+
+        item.innerHTML = `
+          <div class="trace-title">${title}</div>
+          <div class="trace-meta">${date.toLocaleDateString()} ${date.toLocaleTimeString()}</div>
+          <div style="font-size: 0.75rem; color: #666; margin-bottom: 0.5rem;">${fileCount} files</div>
+          <div class="trace-badges">
+            ${Array.from(models).map(m => {
+              const badgeClass = m.includes('claude') ? 'claude' : m.includes('gpt') ? 'gpt' : m.includes('o3') ? 'o3' : '';
+              return `<span class="badge ${badgeClass}">${m.split('/').pop()}</span>`;
+            }).join('')}
+          </div>
+        `;
+
+        item.addEventListener('click', () => selectTrace(trace));
+        listEl.appendChild(item);
+      });
+    }
+
+    function selectTrace(trace) {
+      selectedTrace = trace;
+      renderTraceList();
+      renderCodeView(trace);
+      renderDetails(trace);
+    }
+
+    function renderCodeView(trace) {
+      const viewEl = document.getElementById('code-view');
+      viewEl.innerHTML = '';
+
+      trace.files?.forEach(file => {
+        const fileDiv = document.createElement('div');
+        fileDiv.className = 'code-file';
+        
+        fileDiv.innerHTML = `
+          <div class="code-file-header">${file.path}</div>
+          <div class="code-block">
+            ${generateCodeLines(file)}
+          </div>
+        `;
+        
+        viewEl.appendChild(fileDiv);
+      });
+    }
+
+    function generateCodeLines(file) {
+      // Get all ranges and their attributions
+      const lines = [];
+      file.conversations?.forEach(conv => {
+        conv.ranges?.forEach(range => {
+          for (let i = range.start_line; i <= range.end_line; i++) {
+            lines.push({
+              number: i,
+              model: conv.contributor?.model_id || 'unknown',
+              type: conv.contributor?.type || 'unknown'
+            });
+          }
+        });
+      });
+
+      // Generate code lines (simplified - in real implementation, fetch actual code)
+      return lines.map(line => {
+        const modelName = line.model.split('/').pop();
+        const badgeClass = line.model.includes('claude') ? 'claude' : line.model.includes('gpt') ? 'gpt' : '';
+        return `
+          <div class="code-line">
+            <div class="line-number">${line.number}</div>
+            <div class="line-content">// Code line ${line.number}</div>
+            <div class="line-attribution ${badgeClass}">${modelName}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderDetails(trace) {
+      const panelEl = document.getElementById('details-panel');
+      
+      const files = trace.files || [];
+      const models = new Set();
+      let aiLines = 0, humanLines = 0, mixedLines = 0;
+      
+      files.forEach(f => {
+        f.conversations?.forEach(c => {
+          if (c.contributor?.model_id) models.add(c.contributor.model_id);
+          const rangeCount = c.ranges?.reduce((sum, r) => sum + (r.end_line - r.start_line + 1), 0) || 0;
+          if (c.contributor?.type === 'ai') aiLines += rangeCount;
+          else if (c.contributor?.type === 'human') humanLines += rangeCount;
+          else if (c.contributor?.type === 'mixed') mixedLines += rangeCount;
+        });
+      });
+
+      const totalLines = aiLines + humanLines + mixedLines;
+      const aiPercent = totalLines > 0 ? Math.round((aiLines / totalLines) * 100) : 0;
+      const mixedPercent = totalLines > 0 ? Math.round((mixedLines / totalLines) * 100) : 0;
+      const humanPercent = totalLines > 0 ? Math.round((humanLines / totalLines) * 100) : 0;
+
+      panelEl.innerHTML = `
+        <div class="details-section">
+          <h3>Overview</h3>
+          <div class="details-item">
+            <div class="details-label">Scenario</div>
+            <div class="details-value">${trace.metadata?.scenario || 'N/A'}</div>
+          </div>
+          <div class="details-item">
+            <div class="details-label">Trace ID</div>
+            <div class="details-value" style="font-family: monospace; font-size: 0.75rem;">${trace.id}</div>
+          </div>
+          <div class="details-item">
+            <div class="details-label">Timestamp</div>
+            <div class="details-value">${new Date(trace.timestamp).toLocaleString()}</div>
+          </div>
+          <div class="details-item">
+            <div class="details-label">VCS</div>
+            <div class="details-value" style="font-family: monospace;">git @${trace.vcs?.revision?.substring(0, 12)}</div>
+          </div>
+          <div class="details-item">
+            <div class="details-label">Tool</div>
+            <div class="details-value">${trace.tool?.name} v${trace.tool?.version}</div>
+          </div>
+          ${trace.metadata?.confidence ? `
+          <div class="details-item">
+            <div class="details-label">Confidence</div>
+            <div class="details-value">${Math.round(trace.metadata.confidence * 100)}%</div>
+          </div>
+          ` : ''}
+        </div>
+
+        <div class="details-section">
+          <h3>Attribution</h3>
+          <div class="attribution-chart">
+            <div class="attribution-bar ai" style="flex: ${aiPercent}"></div>
+            <div class="attribution-bar mixed" style="flex: ${mixedPercent}"></div>
+            <div class="attribution-bar human" style="flex: ${humanPercent}"></div>
+          </div>
+          <div style="margin-top: 0.75rem; font-size: 0.875rem;">
+            <div>AI: ${aiLines} lines (${aiPercent}%)</div>
+            <div style="margin-top: 0.25rem;">Mixed: ${mixedLines} lines (${mixedPercent}%)</div>
+            <div style="margin-top: 0.25rem;">Human: ${humanLines} lines (${humanPercent}%)</div>
+          </div>
+        </div>
+
+        <div class="details-section">
+          <h3>Models</h3>
+          ${Array.from(models).map(m => {
+            const badgeClass = m.includes('claude') ? 'claude' : m.includes('gpt') ? 'gpt' : '';
+            return `<div class="badge ${badgeClass}" style="margin-bottom: 0.5rem;">${m}</div>`;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    // Initialize
+    loadStats();
+    loadTraces();
+  </script>
+</body>
+</html>

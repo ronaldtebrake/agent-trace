@@ -60,14 +60,67 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       res.end(JSON.stringify({ status: "ok" }));
     } else if (path === "/" || path === "/index.html") {
       // Serve dashboard HTML
-      const htmlPath = join(__dirname, "../dashboard/public/index.html");
-      if (existsSync(htmlPath)) {
+      // Try multiple possible paths (for different installation scenarios)
+      const possiblePaths = [
+        join(__dirname, "public/index.html"), // Compiled location (dist/dashboard/public/index.html)
+        join(__dirname, "../dashboard/public/index.html"), // Alternative compiled location
+        join(__dirname, "../../src/dashboard/public/index.html"), // Source location (dev)
+        join(process.cwd(), "node_modules/agent-trace-cli/dist/dashboard/public/index.html"), // Installed via npm
+        join(process.cwd(), "node_modules/agent-trace-cli/src/dashboard/public/index.html"), // Installed source
+      ];
+      
+      let htmlPath: string | undefined;
+      for (const testPath of possiblePaths) {
+        if (existsSync(testPath)) {
+          htmlPath = testPath;
+          break;
+        }
+      }
+      
+      if (htmlPath) {
         const html = readFileSync(htmlPath, "utf-8");
         res.writeHead(200, { "Content-Type": "text/html" });
         res.end(html);
       } else {
-        res.writeHead(404, { "Content-Type": "text/plain" });
-        res.end("Dashboard not found");
+        // Fallback: serve a simple HTML page with API info
+        res.writeHead(200, { "Content-Type": "text/html" });
+        res.end(`
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Agent Trace Dashboard</title>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; background: #0a0a0a; color: #e0e0e0; }
+    h1 { color: #fff; }
+    .endpoint { background: #1a1a1a; padding: 1rem; margin: 0.5rem 0; border-radius: 4px; }
+    code { background: #2a2a2a; padding: 0.2rem 0.4rem; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h1>Agent Trace Dashboard API</h1>
+  <p>Dashboard HTML not found, but API endpoints are available:</p>
+  <div class="endpoint">
+    <strong>GET</strong> <code>/api/stats?from=&lt;commit&gt;&amp;to=&lt;commit&gt;</code>
+    <p>Get aggregated statistics</p>
+  </div>
+  <div class="endpoint">
+    <strong>GET</strong> <code>/api/commits/&lt;sha&gt;/traces</code>
+    <p>Get traces for a specific commit</p>
+  </div>
+  <div class="endpoint">
+    <strong>GET</strong> <code>/api/files/&lt;path&gt;/attribution</code>
+    <p>Get file attribution</p>
+  </div>
+  <div class="endpoint">
+    <strong>GET</strong> <code>/api/health</code>
+    <p>Health check</p>
+  </div>
+  <p style="margin-top: 2rem; color: #888;">
+    Note: The dashboard HTML file should be at: <code>src/dashboard/public/index.html</code>
+  </p>
+</body>
+</html>
+        `);
       }
     } else {
       res.writeHead(404, { "Content-Type": "application/json" });
