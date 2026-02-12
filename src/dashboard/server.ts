@@ -94,4 +94,15 @@ export function startDashboardServer(port: number = PORT): void {
     console.log(`  GET /api/files/<path>/attribution?from=<commit>&to=<commit>`);
     console.log(`  GET /api/health`);
   });
+
+  server.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code === "EADDRINUSE") {
+      console.error(`\n❌ Port ${port} is already in use.`);
+      console.error(`   Try: agent-trace dashboard --port <different-port>`);
+      console.error(`   Or stop the process using port ${port}`);
+      process.exit(1);
+    } else {
+      throw error;
+    }
+  });
 }

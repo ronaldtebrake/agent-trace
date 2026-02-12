@@ -35,7 +35,8 @@ export function readTracesFromNotes(commitSha: string): TraceRecord[] {
       .filter((trace): trace is TraceRecord => trace !== null);
   } catch (error: any) {
     // Note doesn't exist or git command failed
-    if (error.status === 1 || error.code === 1) {
+    // Git returns status 128 when note doesn't exist
+    if (error.status === 1 || error.status === 128 || error.code === 1 || error.code === 128) {
       return [];
     }
     throw error;
@@ -53,8 +54,14 @@ export function writeTracesToNotes(
     return;
   }
 
-  // Read existing traces
-  const existing = readTracesFromNotes(commitSha);
+  // Read existing traces (may return empty array if note doesn't exist)
+  let existing: TraceRecord[] = [];
+  try {
+    existing = readTracesFromNotes(commitSha);
+  } catch (error) {
+    // If reading fails, start with empty array
+    existing = [];
+  }
   
   // Merge with new traces (avoid duplicates by ID)
   const existingIds = new Set(existing.map((t) => t.id));
@@ -131,7 +138,12 @@ export function hasTracesInNotes(commitSha: string): boolean {
       { encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
     );
     return true;
-  } catch {
+  } catch (error: any) {
+    // Note doesn't exist - git returns status 128
+    if (error.status === 128 || error.code === 128) {
+      return false;
+    }
+    // Other errors - assume no note
     return false;
   }
 }
