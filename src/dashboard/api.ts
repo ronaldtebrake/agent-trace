@@ -49,14 +49,44 @@ export async function getDashboardStats(
   let commits: string[];
   if (fromCommit) {
     // Get commits in range
-    const output = execFileSync(
-      "git",
-      ["rev-list", `${fromCommit}..${toCommit}`],
-      { cwd: root, encoding: "utf-8" }
-    );
-    commits = output.trim().split("\n").filter((c) => c.trim());
+    try {
+      const output = execFileSync(
+        "git",
+        ["rev-list", `${fromCommit}..${toCommit}`],
+        { cwd: root, encoding: "utf-8" }
+      );
+      commits = output.trim().split("\n").filter((c) => c.trim());
+    } catch {
+      commits = [];
+    }
   } else {
-    commits = getCommitsWithTracesMetadata().map((c) => c.commit);
+    // Get all commits with traces
+    const commitsWithTraces = getCommitsWithTracesMetadata();
+    commits = commitsWithTraces.map((c) => c.commit);
+    
+    // If no commits with traces found, try getting all recent commits and checking for traces
+    if (commits.length === 0) {
+      try {
+        const allCommits = execFileSync(
+          "git",
+          ["rev-list", "--max-count=50", "HEAD"],
+          { cwd: root, encoding: "utf-8" }
+        )
+          .trim()
+          .split("\n")
+          .filter((c) => c.trim());
+        
+        // Check each commit for traces
+        for (const commit of allCommits) {
+          const traces = readTracesFromNotes(commit);
+          if (traces.length > 0) {
+            commits.push(commit);
+          }
+        }
+      } catch {
+        // Ignore errors
+      }
+    }
   }
 
   stats.totalCommits = commits.length;

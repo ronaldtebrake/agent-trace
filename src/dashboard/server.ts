@@ -58,6 +58,46 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     } else if (path === "/api/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
+    } else if (path === "/api/debug") {
+      // Debug endpoint to check git notes
+      const { execFileSync } = require("child_process");
+      const { getCommitsWithTraces, readTracesFromNotes } = require("../lib/git-notes.js");
+      const { getWorkspaceRoot } = require("../lib/trace-store.js");
+      
+      const root = getWorkspaceRoot();
+      let debugInfo: any = {
+        workspaceRoot: root,
+        notesRef: "refs/notes/agent-trace",
+      };
+      
+      try {
+        // Check if notes ref exists
+        execFileSync("git", ["show-ref", "--verify", "refs/notes/agent-trace"], {
+          cwd: root,
+          stdio: "pipe",
+        });
+        debugInfo.notesRefExists = true;
+      } catch {
+        debugInfo.notesRefExists = false;
+      }
+      
+      try {
+        const commits = getCommitsWithTraces();
+        debugInfo.commitsWithTraces = commits.length;
+        debugInfo.commitShas = commits;
+        
+        if (commits.length > 0) {
+          const firstCommit = commits[0];
+          const traces = readTracesFromNotes(firstCommit);
+          debugInfo.firstCommitTraces = traces.length;
+          debugInfo.firstCommitSha = firstCommit;
+        }
+      } catch (error: any) {
+        debugInfo.error = error.message || String(error);
+      }
+      
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(debugInfo, null, 2));
     } else if (path === "/" || path === "/index.html") {
       // Serve dashboard HTML
       // Try multiple possible paths (for different installation scenarios)

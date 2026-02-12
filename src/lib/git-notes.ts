@@ -196,13 +196,16 @@ export function hasTracesInNotes(commitSha: string): boolean {
  */
 export function getCommitsWithTraces(): string[] {
   try {
+    // Ensure notes ref exists first
+    ensureNotesRef();
+    
     const output = execFileSync(
       "git",
       ["notes", "--ref", NOTES_REF, "list"],
-      { encoding: "utf-8" }
+      { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
     );
 
-    return output
+    const commits = output
       .trim()
       .split("\n")
       .filter((line) => line.trim())
@@ -211,8 +214,16 @@ export function getCommitsWithTraces(): string[] {
         const parts = line.split(/\s+/);
         return parts[0];
       })
-      .filter((sha) => sha.length === 40); // Valid SHA
-  } catch {
+      .filter((sha) => sha && sha.length >= 7); // Allow short SHAs too
+    
+    return commits;
+  } catch (error: any) {
+    // If notes ref doesn't exist or is empty, return empty array
+    if (error.status === 128 || error.code === 128) {
+      return [];
+    }
+    // Log other errors for debugging
+    console.warn(`Failed to list git notes: ${error.message || error}`);
     return [];
   }
 }
@@ -226,14 +237,29 @@ export function getCommitsWithTracesMetadata(): Array<{
   timestamp?: string;
 }> {
   const commits = getCommitsWithTraces();
-  return commits.map((commit) => {
-    const traces = readTracesFromNotes(commit);
-    return {
-      commit,
-      traceCount: traces.length,
-      timestamp: traces[0]?.timestamp,
-    };
-  });
+  const result: Array<{
+    commit: string;
+    traceCount: number;
+    timestamp?: string;
+  }> = [];
+  
+  for (const commit of commits) {
+    try {
+      const traces = readTracesFromNotes(commit);
+      if (traces.length > 0) {
+        result.push({
+          commit,
+          traceCount: traces.length,
+          timestamp: traces[0]?.timestamp,
+        });
+      }
+    } catch (error) {
+      // Skip commits with invalid notes
+      console.warn(`Failed to read traces for commit ${commit}: ${error}`);
+    }
+  }
+  
+  return result;
 }
 
 /**
