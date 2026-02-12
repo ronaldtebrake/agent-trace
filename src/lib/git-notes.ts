@@ -71,6 +71,21 @@ export function writeTracesToNotes(
   // Store as JSON array
   const content = JSON.stringify(allTraces, null, 2);
 
+  // Ensure notes ref is valid before writing
+  try {
+    ensureNotesRef();
+  } catch {
+    // If ensure fails, try to fix broken ref
+    try {
+      execFileSync("git", ["update-ref", "-d", NOTES_REF], {
+        stdio: "ignore",
+      });
+      ensureNotesRef();
+    } catch {
+      // Continue anyway, git notes add will create the ref if needed
+    }
+  }
+
   // Use -F flag to read from stdin to avoid shell escaping issues
   const proc = spawnSync(
     "git",
@@ -82,7 +97,35 @@ export function writeTracesToNotes(
   );
 
   if (proc.status !== 0) {
-    throw new Error(`Failed to write git note: ${proc.stderr?.toString() || "unknown error"}`);
+    const errorMsg = proc.stderr?.toString() || proc.stdout?.toString() || "unknown error";
+    
+    // If it's a broken ref error, try to fix it
+    if (errorMsg.includes("Failed to read notes tree")) {
+      try {
+        execFileSync("git", ["update-ref", "-d", NOTES_REF], {
+          stdio: "ignore",
+        });
+        ensureNotesRef();
+        
+        // Retry once
+        const retryProc = spawnSync(
+          "git",
+          ["notes", "--ref", NOTES_REF, "add", "-f", "-F", "-", commitSha],
+          {
+            input: content,
+            encoding: "utf-8",
+          }
+        );
+        
+        if (retryProc.status === 0) {
+          return; // Success on retry
+        }
+      } catch {
+        // Fall through to throw error
+      }
+    }
+    
+    throw new Error(`Failed to write git note: ${errorMsg.trim()}`);
   }
 }
 
@@ -198,18 +241,46 @@ export function getCommitsWithTracesMetadata(): Array<{
  */
 export function ensureNotesRef(): void {
   try {
-    // Check if ref exists
+    // Check if ref exists and is valid
     execFileSync("git", ["show-ref", "--verify", "--quiet", NOTES_REF], {
       stdio: "ignore",
     });
+    
+    // Try to read from it to verify it's valid
+    try {
+      execFileSync("git", ["notes", "--ref", NOTES_REF, "list"], {
+        stdio: "ignore",
+      });
+    } catch {
+      // Ref exists but is broken, delete and recreate
+      try {
+        execFileSync("git", ["update-ref", "-d", NOTES_REF], {
+          stdio: "ignore",
+        });
+      } catch {
+        // Ignore if deletion fails
+      }
+      // Will fall through to creation below
+    }
   } catch {
-    // Create empty notes ref by adding and removing a note
+    // Ref doesn't exist, create it
+  }
+  
+  // Create ref if it doesn't exist (or was broken)
+  try {
+    execFileSync("git", ["show-ref", "--verify", "--quiet", NOTES_REF], {
+      stdio: "ignore",
+    });
+    // Ref exists and is valid
+    return;
+  } catch {
+    // Ref doesn't exist, create it properly
     try {
       execFileSync("git", ["rev-parse", "HEAD"], { stdio: "ignore" });
-      // HEAD exists, create ref properly
+      // HEAD exists, create ref by adding a dummy note then removing it
       execFileSync(
         "git",
-        ["notes", "--ref", NOTES_REF, "add", "-m", "", "HEAD"],
+        ["notes", "--ref", NOTES_REF, "add", "-m", "init", "HEAD"],
         { stdio: "ignore" }
       );
       execFileSync(
@@ -218,15 +289,17 @@ export function ensureNotesRef(): void {
         { stdio: "ignore" }
       );
     } catch {
-      // HEAD doesn't exist yet, create empty ref
-      const emptyBlob = execFileSync(
+      // HEAD doesn't exist yet, create empty tree ref
+      const emptyTree = execFileSync(
         "git",
-        ["hash-object", "-t", "blob", "-w", "--stdin"],
+        ["mktree"],
         { input: "", encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
       ).trim();
-      execFileSync("git", ["update-ref", NOTES_REF, emptyBlob], {
-        stdio: "ignore",
-      });
+      if (emptyTree) {
+        execFileSync("git", ["update-ref", NOTES_REF, emptyTree], {
+          stdio: "ignore",
+        });
+      }
     }
   }
 }
