@@ -11,6 +11,8 @@ import type { FileEdit } from "../lib/types.js";
 interface HookInput {
   hook_event_name?: string;
   model?: string;
+  model_id?: string; // Alternative field name
+  model_name?: string; // Alternative field name
   transcript_path?: string | null;
   conversation_id?: string;
   generation_id?: string;
@@ -34,12 +36,35 @@ interface HookInput {
   tool_use_id?: string;
   source?: string;
   cwd?: string;
+  metadata?: Record<string, unknown>; // May contain model info
+}
+
+// Extract model name from hook input, checking multiple possible fields
+function extractModel(input: HookInput): string | undefined {
+  // Try multiple fields that might contain the model name
+  const model = input.model || input.model_id || input.model_name;
+  if (model && model.trim() !== "") {
+    return model; // Return even if "default"
+  }
+  
+  // Check metadata if available
+  if (input.metadata && typeof input.metadata === 'object') {
+    const metaModel = (input.metadata as any).model || (input.metadata as any).model_id;
+    if (metaModel && metaModel.trim() !== "") {
+      return metaModel;
+    }
+  }
+  
+  return undefined;
 }
 
 // Determine contributor type: if model is undefined/null, it's human; otherwise AI
+// Note: "default" is still considered AI (just unknown which model)
 function getContributorType(input: HookInput): "ai" | "human" {
+  const model = extractModel(input);
   // If model is missing/undefined/null, assume human edit
-  if (!input.model || input.model.trim() === "") {
+  // "default" means AI but model not specified, so still AI
+  if (!model || model.trim() === "") {
     return "human";
   }
   return "ai";
@@ -49,13 +74,14 @@ const handlers: Record<string, (input: HookInput) => void> = {
   afterFileEdit: (input) => {
     if (!input.file_path) return;
     const contributorType = getContributorType(input);
+    const model = extractModel(input);
     const rangePositions = computeRangePositions(
       input.edits ?? [],
       tryReadFile(input.file_path)
     );
     appendTrace(
       createTrace(contributorType, input.file_path, {
-        model: input.model,
+        model: model,
         rangePositions,
         transcript: input.transcript_path,
         metadata: {
@@ -69,10 +95,11 @@ const handlers: Record<string, (input: HookInput) => void> = {
   afterTabFileEdit: (input) => {
     if (!input.file_path) return;
     const contributorType = getContributorType(input);
+    const model = extractModel(input);
     const rangePositions = computeRangePositions(input.edits ?? []);
     appendTrace(
       createTrace(contributorType, input.file_path, {
-        model: input.model,
+        model: model,
         rangePositions,
         metadata: {
           conversation_id: input.conversation_id,
@@ -84,9 +111,10 @@ const handlers: Record<string, (input: HookInput) => void> = {
 
   afterShellExecution: (input) => {
     const contributorType = getContributorType(input);
+    const model = extractModel(input);
     appendTrace(
       createTrace(contributorType, ".shell-history", {
-        model: input.model,
+        model: model,
         transcript: input.transcript_path,
         metadata: {
           conversation_id: input.conversation_id,
@@ -99,9 +127,11 @@ const handlers: Record<string, (input: HookInput) => void> = {
   },
 
   sessionStart: (input) => {
+    const model = extractModel(input);
+    const contributorType = model ? "ai" : "human";
     appendTrace(
-      createTrace("ai", ".sessions", {
-        model: input.model,
+      createTrace(contributorType, ".sessions", {
+        model: model,
         metadata: {
           event: "session_start",
           session_id: input.session_id,
@@ -114,9 +144,11 @@ const handlers: Record<string, (input: HookInput) => void> = {
   },
 
   sessionEnd: (input) => {
+    const model = extractModel(input);
+    const contributorType = model ? "ai" : "human";
     appendTrace(
-      createTrace("ai", ".sessions", {
-        model: input.model,
+      createTrace(contributorType, ".sessions", {
+        model: model,
         metadata: {
           event: "session_end",
           session_id: input.session_id,
@@ -136,6 +168,7 @@ const handlers: Record<string, (input: HookInput) => void> = {
     if (!isFileEdit && !isBash) return;
 
     const contributorType = getContributorType(input);
+    const model = extractModel(input);
     const file = isBash
       ? ".shell-history"
       : input.tool_input?.file_path ?? ".unknown";
@@ -155,7 +188,7 @@ const handlers: Record<string, (input: HookInput) => void> = {
 
     appendTrace(
       createTrace(contributorType, file, {
-        model: input.model,
+        model: model,
         rangePositions,
         transcript: input.transcript_path,
         metadata: {
@@ -169,9 +202,11 @@ const handlers: Record<string, (input: HookInput) => void> = {
   },
 
   SessionStart: (input) => {
+    const model = extractModel(input);
+    const contributorType = model ? "ai" : "human";
     appendTrace(
-      createTrace("ai", ".sessions", {
-        model: input.model,
+      createTrace(contributorType, ".sessions", {
+        model: model,
         metadata: {
           event: "session_start",
           session_id: input.session_id,
@@ -182,9 +217,11 @@ const handlers: Record<string, (input: HookInput) => void> = {
   },
 
   SessionEnd: (input) => {
+    const model = extractModel(input);
+    const contributorType = model ? "ai" : "human";
     appendTrace(
-      createTrace("ai", ".sessions", {
-        model: input.model,
+      createTrace(contributorType, ".sessions", {
+        model: model,
         metadata: {
           event: "session_end",
           session_id: input.session_id,

@@ -65,7 +65,8 @@ export function toRelativePath(absolutePath: string, root: string): string {
 }
 
 export function normalizeModelId(model?: string): string | undefined {
-  if (!model) return undefined;
+  if (!model || model.trim() === "") return undefined;
+  
   if (model.includes("/")) return model;
   const prefixes: Record<string, string> = {
     "claude-": "anthropic",
@@ -77,7 +78,7 @@ export function normalizeModelId(model?: string): string | undefined {
   for (const [prefix, provider] of Object.entries(prefixes)) {
     if (model.startsWith(prefix)) return `${provider}/${model}`;
   }
-  return model;
+  return model; // Return as-is, including "default"
 }
 
 export function computeRangePositions(

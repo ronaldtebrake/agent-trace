@@ -147,6 +147,11 @@
       color: #fff;
     }
 
+    .badge.default {
+      background: #6b7280;
+      color: #fff;
+    }
+
     .content-area {
       flex: 1;
       display: flex;
@@ -278,6 +283,11 @@
     .line-attribution[data-type="human"] .attribution-badge {
       background: rgba(16, 185, 129, 0.2);
       color: #10b981;
+    }
+
+    .line-attribution.default .attribution-badge {
+      background: rgba(107, 114, 128, 0.2);
+      color: #9ca3af;
     }
 
     .line-attribution:empty::before {
@@ -644,8 +654,12 @@
           <div style="font-size: 0.75rem; color: #666; margin-bottom: 0.5rem;">${fileCount} files</div>
           <div class="trace-badges">
             ${Array.from(models).map(m => {
-              const badgeClass = m.includes('claude') ? 'claude' : m.includes('gpt') ? 'gpt' : m.includes('o3') ? 'o3' : '';
-              return `<span class="badge ${badgeClass}">${m.split('/').pop()}</span>`;
+              const badgeClass = m.includes('claude') ? 'claude' : 
+                               m.includes('gpt') ? 'gpt' : 
+                               m.includes('o3') ? 'o3' : 
+                               m.toLowerCase() === 'default' ? 'default' : '';
+              const displayName = m.toLowerCase() === 'default' ? 'Auto' : m.split('/').pop();
+              return `<span class="badge ${badgeClass}">${displayName}</span>`;
             }).join('')}
           </div>
         `;
@@ -1014,17 +1028,35 @@
           // Build attribution badge
           let attributionHtml = '';
           if (lineData.attribution) {
-            const modelName = lineData.attribution.model.split('/').pop();
-            const badgeClass = lineData.attribution.model.includes('claude') ? 'claude' : 
-                             lineData.attribution.model.includes('gpt') ? 'gpt' : 
-                             lineData.attribution.model.includes('o3') ? 'o3' : '';
-            const contributorLabel = lineData.attribution.type === 'human' ? 'Human' : modelName;
-            const contributorType = lineData.attribution.type === 'human' ? 'human' : 'ai';
-            attributionHtml = `
-              <div class="line-attribution ${badgeClass}" data-type="${contributorType}">
-                <span class="attribution-badge">${contributorLabel}</span>
-              </div>
-            `;
+            const model = lineData.attribution.model;
+            if (model && model.trim() !== '') {
+              let modelName = model.includes('/') ? model.split('/').pop() : model;
+              let badgeClass = '';
+              let contributorLabel = '';
+              
+              if (lineData.attribution.type === 'human') {
+                contributorLabel = 'Human';
+                badgeClass = '';
+              } else if (model.toLowerCase() === 'default') {
+                contributorLabel = 'Auto';
+                badgeClass = 'default';
+              } else {
+                contributorLabel = modelName;
+                badgeClass = model.includes('claude') ? 'claude' : 
+                           model.includes('gpt') ? 'gpt' : 
+                           model.includes('o3') ? 'o3' : '';
+              }
+              
+              const contributorType = lineData.attribution.type === 'human' ? 'human' : 'ai';
+              attributionHtml = `
+                <div class="line-attribution ${badgeClass}" data-type="${contributorType}">
+                  <span class="attribution-badge">${contributorLabel}</span>
+                </div>
+              `;
+            } else {
+              // No model info - show as unknown
+              attributionHtml = '<div class="line-attribution"><span class="attribution-badge unknown">Unknown</span></div>';
+            }
           } else if (lineData.type === 'added') {
             // Added lines without attribution - might be human edits
             attributionHtml = '<div class="line-attribution"><span class="attribution-badge unknown">Unknown</span></div>';
@@ -1190,8 +1222,12 @@
         <div class="details-section">
           <h3>Models</h3>
           ${Array.from(models).map(m => {
-            const badgeClass = m.includes('claude') ? 'claude' : m.includes('gpt') ? 'gpt' : '';
-            return `<div class="badge ${badgeClass}" style="margin-bottom: 0.5rem;">${m}</div>`;
+            const badgeClass = m.includes('claude') ? 'claude' : 
+                             m.includes('gpt') ? 'gpt' : 
+                             m.includes('o3') ? 'o3' : 
+                             m.toLowerCase() === 'default' ? 'default' : '';
+            const displayName = m.toLowerCase() === 'default' ? 'Auto' : m;
+            return `<div class="badge ${badgeClass}" style="margin-bottom: 0.5rem;">${displayName}</div>`;
           }).join('')}
         </div>
       `;
