@@ -57,22 +57,42 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       res.end(JSON.stringify(attribution));
     } else if (path.startsWith("/api/commits/") && path.endsWith("/raw-notes")) {
       const commitSha = path.split("/")[3];
-      const rawNotes = getRawNotes(commitSha);
-      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end(rawNotes);
+      try {
+        const rawNotes = getRawNotes(commitSha);
+        if (rawNotes === "") {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Not found" }));
+        } else {
+          res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+          res.end(rawNotes);
+        }
+      } catch (error: any) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error", message: error.message }));
+      }
     } else if (path.startsWith("/api/commits/") && path.endsWith("/diff")) {
       const commitSha = path.split("/")[3];
-      const diff = getCommitDiff(commitSha);
-      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end(diff);
+      try {
+        const diff = getCommitDiff(commitSha);
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(diff);
+      } catch (error: any) {
+        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(`Error: ${error.message || error}`);
+      }
     } else if (path.startsWith("/api/commits/") && path.includes("/files/")) {
       // /api/commits/{sha}/files/{path}
       const parts = path.split("/");
       const commitSha = parts[3];
       const filePath = decodeURIComponent(parts.slice(5).join("/"));
-      const content = getFileContent(commitSha, filePath);
-      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end(content);
+      try {
+        const content = getFileContent(commitSha, filePath);
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(content);
+      } catch (error: any) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Not found", message: error.message }));
+      }
     } else if (path === "/api/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));

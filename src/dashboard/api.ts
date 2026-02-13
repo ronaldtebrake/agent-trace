@@ -260,10 +260,10 @@ export function getRawNotes(commitSha: string): string {
     ).trim();
     return noteContent;
   } catch (error: any) {
-    if (error.status === 128 || error.code === 128) {
+    if (error.status === 128 || error.code === 128 || error.status === 1) {
       return ""; // Note doesn't exist
     }
-    throw error;
+    throw new Error(`Failed to read git notes: ${error.message || error}`);
   }
 }
 

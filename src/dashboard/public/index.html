@@ -461,10 +461,14 @@
         t.classList.toggle('active', t.dataset.tab === tabName);
       });
       
-      // Update tab content
+      // Update tab content - hide all first, then show selected
       document.querySelectorAll('.tab-content').forEach(c => {
-        c.classList.toggle('active', c.id === `tab-${tabName}`);
+        c.classList.remove('active');
       });
+      const selectedTab = document.getElementById(`tab-${tabName}`);
+      if (selectedTab) {
+        selectedTab.classList.add('active');
+      }
       
       // Load content for the selected tab
       if (selectedTrace) {
@@ -472,6 +476,8 @@
           loadRawNotes();
         } else if (tabName === 'diff') {
           loadDiff();
+        } else if (tabName === 'code') {
+          renderCodeView(selectedTrace);
         }
       }
     }
@@ -497,10 +503,15 @@
         const stats = await res.json();
         
         if (stats.commits && stats.commits.length > 0) {
-          // Load traces for each commit
+          // Load traces for each commit and attach commit SHA to each trace
           const tracePromises = stats.commits.map(async (commit) => {
             const traceRes = await fetch(`${API_BASE}/commits/${commit.sha}/traces`);
-            return await traceRes.json();
+            const commitTraces = await traceRes.json();
+            // Attach commit SHA to each trace for later use
+            return commitTraces.map(trace => ({
+              ...trace,
+              _commitSha: commit.sha // Store commit SHA for API calls
+            }));
           });
           
           const traceArrays = await Promise.all(tracePromises);
@@ -596,15 +607,37 @@
     }
 
     async function loadRawNotes() {
-      if (!selectedTrace?.vcs?.revision) {
+      // Get commit SHA from trace's _commitSha (attached when loading) or vcs.revision
+      const commitSha = selectedTrace?._commitSha || selectedTrace?.vcs?.revision;
+      
+      if (!commitSha) {
         document.getElementById('raw-content').textContent = 'No commit SHA available';
         return;
       }
       
+      const rawContentEl = document.getElementById('raw-content');
+      rawContentEl.textContent = 'Loading...';
+      
       try {
-        const commitSha = selectedTrace.vcs.revision;
         const res = await fetch(`${API_BASE}/commits/${commitSha}/raw-notes`);
+        const contentType = res.headers.get('content-type') || '';
+        
+        if (!res.ok) {
+          if (contentType.includes('application/json')) {
+            const error = await res.json();
+            rawContentEl.textContent = `Error: ${error.error || error.message || 'Not found'}`;
+          } else {
+            rawContentEl.textContent = `Error: HTTP ${res.status} ${res.statusText}`;
+          }
+          return;
+        }
+        
         const rawNotes = await res.text();
+        
+        if (!rawNotes || rawNotes.trim() === '') {
+          rawContentEl.textContent = 'No notes found for this commit';
+          return;
+        }
         
         // Try to format as JSON if possible
         let formatted = rawNotes;
@@ -615,21 +648,27 @@
           // Not JSON, use as-is
         }
         
-        document.getElementById('raw-content').textContent = formatted || 'No notes found';
+        rawContentEl.textContent = formatted;
       } catch (error) {
-        document.getElementById('raw-content').textContent = `Error loading raw notes: ${error.message}`;
+        rawContentEl.textContent = `Error loading raw notes: ${error.message || error}`;
+        console.error('Raw notes error:', error);
       }
     }
 
     async function loadDiff() {
-      if (!selectedTrace?.vcs?.revision) {
+      // Get commit SHA from trace's _commitSha (attached when loading) or vcs.revision
+      const commitSha = selectedTrace?._commitSha || selectedTrace?.vcs?.revision;
+      
+      if (!commitSha) {
         document.getElementById('diff-content').textContent = 'No commit SHA available';
         return;
       }
       
       try {
-        const commitSha = selectedTrace.vcs.revision;
         const res = await fetch(`${API_BASE}/commits/${commitSha}/diff`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
         const diff = await res.text();
         
         // Render diff with syntax highlighting
@@ -637,7 +676,13 @@
         diffEl.innerHTML = '';
         
         if (!diff || diff.trim() === '') {
-          diffEl.textContent = 'No diff available';
+          diffEl.textContent = 'No diff available for this commit';
+          return;
+        }
+        
+        // Check if it's an error message
+        if (diff.startsWith('Error:')) {
+          diffEl.textContent = diff;
           return;
         }
         
@@ -664,14 +709,15 @@
           
           const contentEl = document.createElement('span');
           contentEl.className = 'diff-line-content';
-          contentEl.textContent = line;
+          contentEl.textContent = escapeHtml(line);
           
           lineEl.appendChild(lineNumEl);
           lineEl.appendChild(contentEl);
           diffEl.appendChild(lineEl);
         });
       } catch (error) {
-        document.getElementById('diff-content').textContent = `Error loading diff: ${error.message}`;
+        document.getElementById('diff-content').textContent = `Error loading diff: ${error.message || error}`;
+        console.error('Diff error:', error);
       }
     }
 
@@ -719,19 +765,21 @@
       });
 
       // Fetch actual file content if we have a commit SHA
-      if (selectedTrace?.vcs?.revision) {
+      const commitSha = selectedTrace?._commitSha || selectedTrace?.vcs?.revision;
+      if (commitSha) {
         try {
-          const commitSha = selectedTrace.vcs.revision;
           const res = await fetch(`${API_BASE}/commits/${commitSha}/files/${encodeURIComponent(file.path)}`);
-          const content = await res.text();
-          
-          if (content && !content.startsWith('Error:')) {
-            const fileLines = content.split('\n');
-            lineMap.forEach((line, num) => {
-              if (num >= 1 && num <= fileLines.length) {
-                line.content = fileLines[num - 1] || '';
-              }
-            });
+          if (res.ok) {
+            const content = await res.text();
+            
+            if (content && !content.startsWith('Error:')) {
+              const fileLines = content.split('\n');
+              lineMap.forEach((line, num) => {
+                if (num >= 1 && num <= fileLines.length) {
+                  line.content = fileLines[num - 1] || '';
+                }
+              });
+            }
           }
         } catch (error) {
           console.warn('Failed to fetch file content:', error);
