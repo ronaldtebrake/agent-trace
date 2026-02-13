@@ -16,7 +16,7 @@ function main() {
   console.log("Populating test data...\n");
 
   // Ensure notes ref exists
-  ensureNotesRef();
+  ensureNotesRef(root);
 
   // Create test code files
   console.log("Creating test code files...");
@@ -100,7 +100,7 @@ function main() {
 
   // Attach traces to commit
   console.log(`\nAttaching traces to commit ${commitSha.substring(0, 8)}...`);
-  writeTracesToNotes(commitSha, [sampleTraces[0]]);
+  writeTracesToNotes(commitSha, [sampleTraces[0]], root);
   console.log("  ✓ Attached trace for 'Auth Middleware Refactor'");
 
   // Create more commits with traces
@@ -112,20 +112,31 @@ function main() {
     const webhookPath = join(root, "src/api/webhooks/stripe.ts");
     mkdirSync(join(webhookPath, ".."), { recursive: true });
     writeFileSync(webhookPath, "// Stripe webhook handler");
-    execSync("git add src/api/webhooks/stripe.ts", { cwd: root, stdio: "ignore" });
-    execSync('git commit -m "Fix Stripe webhook bug (PAY-291)"', {
-      cwd: root,
-      stdio: "ignore",
-    });
-    commitSha2 = execSync("git rev-parse HEAD", {
-      cwd: root,
-      encoding: "utf-8",
-    }).trim();
-  } catch (error) {
-    console.warn("  ⚠ Warning: Failed to create second commit:", error);
+    execSync("git add src/api/webhooks/stripe.ts", { cwd: root, stdio: "pipe" });
+    
+    // Check if there are changes to commit
+    const status = execSync("git status --porcelain", { cwd: root, encoding: "utf-8" });
+    if (status.trim().includes("stripe.ts")) {
+      const commitOutput = execSync('git commit -m "Fix Stripe webhook bug (PAY-291)"', {
+        cwd: root,
+        encoding: "utf-8",
+        stdio: "pipe",
+      });
+      commitSha2 = execSync("git rev-parse HEAD", {
+        cwd: root,
+        encoding: "utf-8",
+      }).trim();
+    } else {
+      console.log("  (no changes to commit for second commit)");
+    }
+  } catch (error: any) {
+    const errorMsg = error.stderr?.toString() || error.stdout?.toString() || error.message || String(error);
+    if (!errorMsg.includes("nothing to commit")) {
+      console.warn("  ⚠ Warning: Failed to create second commit:", errorMsg.trim());
+    }
   }
   if (commitSha2) {
-    writeTracesToNotes(commitSha2, [sampleTraces[1]]);
+    writeTracesToNotes(commitSha2, [sampleTraces[1]], root);
     console.log("  ✓ Created commit with Stripe webhook trace");
   }
 
@@ -137,22 +148,33 @@ function main() {
     writeFileSync(analyticsPath, "// Analytics component");
     execSync("git add src/components/dashboard/Analytics.tsx", {
       cwd: root,
-      stdio: "ignore",
+      stdio: "pipe",
     });
-    execSync('git commit -m "Add analytics dashboard feature"', {
-      cwd: root,
-      stdio: "ignore",
-    });
-    commitSha3 = execSync("git rev-parse HEAD", {
-      cwd: root,
-      encoding: "utf-8",
-    }).trim();
-  } catch (error) {
-    console.warn("  ⚠ Warning: Failed to create third commit:", error);
+    
+    // Check if there are changes to commit
+    const status = execSync("git status --porcelain", { cwd: root, encoding: "utf-8" });
+    if (status.trim().includes("Analytics.tsx")) {
+      const commitOutput = execSync('git commit -m "Add analytics dashboard feature"', {
+        cwd: root,
+        encoding: "utf-8",
+        stdio: "pipe",
+      });
+      commitSha3 = execSync("git rev-parse HEAD", {
+        cwd: root,
+        encoding: "utf-8",
+      }).trim();
+    } else {
+      console.log("  (no changes to commit for third commit)");
+    }
+  } catch (error: any) {
+    const errorMsg = error.stderr?.toString() || error.stdout?.toString() || error.message || String(error);
+    if (!errorMsg.includes("nothing to commit")) {
+      console.warn("  ⚠ Warning: Failed to create third commit:", errorMsg.trim());
+    }
   }
   
   if (commitSha3) {
-    writeTracesToNotes(commitSha3, [sampleTraces[2]]);
+    writeTracesToNotes(commitSha3, [sampleTraces[2]], root);
     console.log("  ✓ Created commit with Analytics dashboard trace");
   }
 

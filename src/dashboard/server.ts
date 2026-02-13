@@ -82,13 +82,13 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       }
       
       try {
-        const commits = getCommitsWithTraces();
+        const commits = getCommitsWithTraces(root);
         debugInfo.commitsWithTraces = commits.length;
         debugInfo.commitShas = commits;
         
         if (commits.length > 0) {
           const firstCommit = commits[0];
-          const traces = readTracesFromNotes(firstCommit);
+          const traces = readTracesFromNotes(firstCommit, root);
           debugInfo.firstCommitTraces = traces.length;
           debugInfo.firstCommitSha = firstCommit;
         }

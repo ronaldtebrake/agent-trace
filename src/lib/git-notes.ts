@@ -7,12 +7,12 @@ const NOTES_REF = "refs/notes/agent-trace";
 /**
  * Read trace records from git notes for a specific commit
  */
-export function readTracesFromNotes(commitSha: string): TraceRecord[] {
+export function readTracesFromNotes(commitSha: string, cwd?: string): TraceRecord[] {
   try {
     const noteContent = execFileSync(
       "git",
       ["notes", "--ref", NOTES_REF, "show", commitSha],
-      { encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+      { encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"], cwd }
     ).trim();
 
     if (!noteContent) {
@@ -48,7 +48,8 @@ export function readTracesFromNotes(commitSha: string): TraceRecord[] {
  */
 export function writeTracesToNotes(
   commitSha: string,
-  traces: TraceRecord[]
+  traces: TraceRecord[],
+  cwd?: string
 ): void {
   if (traces.length === 0) {
     return;
@@ -57,7 +58,7 @@ export function writeTracesToNotes(
   // Read existing traces (may return empty array if note doesn't exist)
   let existing: TraceRecord[] = [];
   try {
-    existing = readTracesFromNotes(commitSha);
+    existing = readTracesFromNotes(commitSha, cwd);
   } catch (error) {
     // If reading fails, start with empty array
     existing = [];
@@ -73,14 +74,15 @@ export function writeTracesToNotes(
 
   // Ensure notes ref is valid before writing
   try {
-    ensureNotesRef();
+    ensureNotesRef(cwd);
   } catch {
     // If ensure fails, try to fix broken ref
     try {
       execFileSync("git", ["update-ref", "-d", NOTES_REF], {
         stdio: "ignore",
+        cwd,
       });
-      ensureNotesRef();
+      ensureNotesRef(cwd);
     } catch {
       // Continue anyway, git notes add will create the ref if needed
     }
@@ -93,6 +95,7 @@ export function writeTracesToNotes(
     {
       input: content,
       encoding: "utf-8",
+      cwd,
     }
   );
 
@@ -104,8 +107,9 @@ export function writeTracesToNotes(
       try {
         execFileSync("git", ["update-ref", "-d", NOTES_REF], {
           stdio: "ignore",
+          cwd,
         });
-        ensureNotesRef();
+        ensureNotesRef(cwd);
         
         // Retry once
         const retryProc = spawnSync(
@@ -114,6 +118,7 @@ export function writeTracesToNotes(
           {
             input: content,
             encoding: "utf-8",
+            cwd,
           }
         );
         
@@ -134,9 +139,10 @@ export function writeTracesToNotes(
  */
 export function appendTraceToNotes(
   commitSha: string,
-  trace: TraceRecord
+  trace: TraceRecord,
+  cwd?: string
 ): void {
-  writeTracesToNotes(commitSha, [trace]);
+  writeTracesToNotes(commitSha, [trace], cwd);
 }
 
 /**
@@ -144,7 +150,8 @@ export function appendTraceToNotes(
  */
 export function readTracesFromNotesRange(
   fromCommit: string,
-  toCommit: string = "HEAD"
+  toCommit: string = "HEAD",
+  cwd?: string
 ): TraceRecord[] {
   try {
     // Get all commits in range
@@ -159,7 +166,7 @@ export function readTracesFromNotesRange(
 
     const allTraces: TraceRecord[] = [];
     for (const commit of commits) {
-      const traces = readTracesFromNotes(commit);
+      const traces = readTracesFromNotes(commit, cwd);
       allTraces.push(...traces);
     }
 
@@ -173,12 +180,12 @@ export function readTracesFromNotesRange(
 /**
  * Check if a commit has traces in notes
  */
-export function hasTracesInNotes(commitSha: string): boolean {
+export function hasTracesInNotes(commitSha: string, cwd?: string): boolean {
   try {
     execFileSync(
       "git",
       ["notes", "--ref", NOTES_REF, "show", commitSha],
-      { encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+      { encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"], cwd }
     );
     return true;
   } catch (error: any) {
@@ -194,16 +201,20 @@ export function hasTracesInNotes(commitSha: string): boolean {
 /**
  * Get all commits that have traces in notes
  */
-export function getCommitsWithTraces(): string[] {
+export function getCommitsWithTraces(cwd?: string): string[] {
   try {
     // Ensure notes ref exists first
-    ensureNotesRef();
+    ensureNotesRef(cwd);
     
     const output = execFileSync(
       "git",
       ["notes", "--ref", NOTES_REF, "list"],
-      { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }
+      { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], cwd }
     );
+
+    if (!output || !output.trim()) {
+      return [];
+    }
 
     const commits = output
       .trim()
@@ -211,15 +222,21 @@ export function getCommitsWithTraces(): string[] {
       .filter((line) => line.trim())
       .map((line) => {
         // Format: <commit-sha> <notes-object-sha>
-        const parts = line.split(/\s+/);
-        return parts[0];
+        // Can also be just <commit-sha> in some git versions
+        const parts = line.trim().split(/\s+/);
+        const sha = parts[0];
+        // Validate it looks like a commit SHA (at least 7 chars, hex)
+        if (sha && /^[0-9a-f]{7,40}$/i.test(sha)) {
+          return sha;
+        }
+        return null;
       })
-      .filter((sha) => sha && sha.length >= 7); // Allow short SHAs too
+      .filter((sha): sha is string => sha !== null);
     
     return commits;
   } catch (error: any) {
     // If notes ref doesn't exist or is empty, return empty array
-    if (error.status === 128 || error.code === 128) {
+    if (error.status === 128 || error.code === 128 || error.status === 1) {
       return [];
     }
     // Log other errors for debugging
@@ -231,12 +248,12 @@ export function getCommitsWithTraces(): string[] {
 /**
  * Get commits with traces and their metadata
  */
-export function getCommitsWithTracesMetadata(): Array<{
+export function getCommitsWithTracesMetadata(cwd?: string): Array<{
   commit: string;
   traceCount: number;
   timestamp?: string;
 }> {
-  const commits = getCommitsWithTraces();
+  const commits = getCommitsWithTraces(cwd);
   const result: Array<{
     commit: string;
     traceCount: number;
@@ -245,7 +262,7 @@ export function getCommitsWithTracesMetadata(): Array<{
   
   for (const commit of commits) {
     try {
-      const traces = readTracesFromNotes(commit);
+      const traces = readTracesFromNotes(commit, cwd);
       if (traces.length > 0) {
         result.push({
           commit,
@@ -265,23 +282,26 @@ export function getCommitsWithTracesMetadata(): Array<{
 /**
  * Ensure notes ref exists and is configured
  */
-export function ensureNotesRef(): void {
+export function ensureNotesRef(cwd?: string): void {
   try {
     // Check if ref exists and is valid
     execFileSync("git", ["show-ref", "--verify", "--quiet", NOTES_REF], {
       stdio: "ignore",
+      cwd,
     });
     
     // Try to read from it to verify it's valid
     try {
       execFileSync("git", ["notes", "--ref", NOTES_REF, "list"], {
         stdio: "ignore",
+        cwd,
       });
     } catch {
       // Ref exists but is broken, delete and recreate
       try {
         execFileSync("git", ["update-ref", "-d", NOTES_REF], {
           stdio: "ignore",
+          cwd,
         });
       } catch {
         // Ignore if deletion fails
@@ -296,34 +316,36 @@ export function ensureNotesRef(): void {
   try {
     execFileSync("git", ["show-ref", "--verify", "--quiet", NOTES_REF], {
       stdio: "ignore",
+      cwd,
     });
     // Ref exists and is valid
     return;
   } catch {
     // Ref doesn't exist, create it properly
     try {
-      execFileSync("git", ["rev-parse", "HEAD"], { stdio: "ignore" });
+      execFileSync("git", ["rev-parse", "HEAD"], { stdio: "ignore", cwd });
       // HEAD exists, create ref by adding a dummy note then removing it
       execFileSync(
         "git",
         ["notes", "--ref", NOTES_REF, "add", "-m", "init", "HEAD"],
-        { stdio: "ignore" }
+        { stdio: "ignore", cwd }
       );
       execFileSync(
         "git",
         ["notes", "--ref", NOTES_REF, "remove", "HEAD"],
-        { stdio: "ignore" }
+        { stdio: "ignore", cwd }
       );
     } catch {
       // HEAD doesn't exist yet, create empty tree ref
       const emptyTree = execFileSync(
         "git",
         ["mktree"],
-        { input: "", encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+        { input: "", encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"], cwd }
       ).trim();
       if (emptyTree) {
         execFileSync("git", ["update-ref", NOTES_REF, emptyTree], {
           stdio: "ignore",
+          cwd,
         });
       }
     }

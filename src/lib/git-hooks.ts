@@ -52,7 +52,7 @@ export function attachStagingTraces(): void {
     return;
   }
 
-  ensureNotesRef();
+  ensureNotesRef(root);
 
   // Get current HEAD
   let commitSha: string;
@@ -82,7 +82,8 @@ export function attachStagingTraces(): void {
 
   // Attach to commit
   if (traces.length > 0) {
-    writeTracesToNotes(commitSha, traces);
+    const root = getWorkspaceRoot();
+    writeTracesToNotes(commitSha, traces, root);
     
     // Clear staging file
     unlinkSync(stagingPath);

@@ -216,7 +216,8 @@ function main() {
 
   // Ensure git notes ref exists
   try {
-    ensureNotesRef();
+    const root = getWorkspaceRoot();
+    ensureNotesRef(root);
     console.log(`✓ Git notes ref configured: refs/notes/agent-trace`);
   } catch (error) {
     console.warn(`⚠ Failed to configure git notes: ${error}`);

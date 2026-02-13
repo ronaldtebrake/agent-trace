@@ -27,7 +27,7 @@ export async function analyzeCommit(
   const commitSha = await resolveCommit(target);
   
   // Read traces from git notes for this specific commit
-  const traces = readTracesFromNotes(commitSha);
+  const traces = readTracesFromNotes(commitSha, root);
   
   // Get commit info
   const commitInfo = await getCommitInfo(commitSha, root);

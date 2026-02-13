@@ -148,9 +148,9 @@ export function createTrace(
 }
 
 export function appendTrace(trace: TraceRecord): void {
-  ensureNotesRef();
-  
   const root = getWorkspaceRoot();
+  ensureNotesRef(root);
+  
   let commitSha: string;
   
   try {
@@ -160,7 +160,7 @@ export function appendTrace(trace: TraceRecord): void {
     }).trim();
     
     // Append trace to git notes for current commit
-    appendTraceToNotes(commitSha, trace);
+    appendTraceToNotes(commitSha, trace, root);
   } catch {
     // Not in a git repo or no commits yet - store in staging area
     // This will be attached to the commit when it's created
@@ -172,22 +172,23 @@ export function appendTrace(trace: TraceRecord): void {
 }
 
 export function readTraces(root?: string, commitSha?: string): TraceRecord[] {
+  const workspaceRoot = root || getWorkspaceRoot();
+  
   // If specific commit requested, read from notes
   if (commitSha) {
-    return readTracesFromNotes(commitSha);
+    return readTracesFromNotes(commitSha, workspaceRoot);
   }
 
   // Otherwise, read all traces from all commits with notes
-  const commits = getCommitsWithTraces();
+  const commits = getCommitsWithTraces(workspaceRoot);
   const allTraces: TraceRecord[] = [];
   
   for (const commit of commits) {
-    const traces = readTracesFromNotes(commit);
+    const traces = readTracesFromNotes(commit, workspaceRoot);
     allTraces.push(...traces);
   }
 
   // Also check staging area for traces not yet committed
-  const workspaceRoot = root || getWorkspaceRoot();
   const stagingPath = join(workspaceRoot, STAGING_PATH);
   if (existsSync(stagingPath)) {
     const content = readFileSync(stagingPath, "utf-8");

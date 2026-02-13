@@ -32,7 +32,14 @@ export async function getDashboardStats(
   fromCommit?: string,
   toCommit: string = "HEAD"
 ): Promise<DashboardStats> {
-  const root = getWorkspaceRoot();
+  // Get workspace root - this should be the repo where dashboard is running
+  let root: string;
+  try {
+    root = getWorkspaceRoot();
+  } catch (error) {
+    // Fallback to process.cwd() if git repo detection fails
+    root = process.cwd();
+  }
   const stats: DashboardStats = {
     totalCommits: 0,
     totalTraces: 0,
@@ -61,7 +68,7 @@ export async function getDashboardStats(
     }
   } else {
     // Get all commits with traces
-    const commitsWithTraces = getCommitsWithTracesMetadata();
+    const commitsWithTraces = getCommitsWithTracesMetadata(root);
     commits = commitsWithTraces.map((c) => c.commit);
     
     // If no commits with traces found, try getting all recent commits and checking for traces
@@ -78,7 +85,7 @@ export async function getDashboardStats(
         
         // Check each commit for traces
         for (const commit of allCommits) {
-          const traces = readTracesFromNotes(commit);
+          const traces = readTracesFromNotes(commit, root);
           if (traces.length > 0) {
             commits.push(commit);
           }
@@ -93,7 +100,7 @@ export async function getDashboardStats(
 
   // Get commit metadata
   for (const commit of commits) {
-    const traces = readTracesFromNotes(commit);
+    const traces = readTracesFromNotes(commit, root);
     if (traces.length === 0) continue;
 
     // Get commit info
@@ -158,7 +165,8 @@ export async function getDashboardStats(
  * Get traces for a specific commit
  */
 export function getCommitTraces(commitSha: string): TraceRecord[] {
-  return readTracesFromNotes(commitSha);
+  const root = getWorkspaceRoot();
+  return readTracesFromNotes(commitSha, root);
 }
 
 /**
@@ -187,7 +195,7 @@ export function getFileAttribution(
     );
     commits = output.trim().split("\n").filter((c) => c.trim());
   } else {
-    commits = getCommitsWithTracesMetadata().map((c) => c.commit);
+    commits = getCommitsWithTracesMetadata(root).map((c) => c.commit);
   }
 
   const attribution: Array<{
@@ -200,7 +208,7 @@ export function getFileAttribution(
   }> = [];
 
   for (const commit of commits) {
-    const traces = readTracesFromNotes(commit);
+    const traces = readTracesFromNotes(commit, root);
     const ranges: Array<{
       start_line: number;
       end_line: number;

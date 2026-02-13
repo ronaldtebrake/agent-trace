@@ -23,8 +23,8 @@ export const validateCommand = new Command("validate")
 
     // Check for git notes
     try {
-      ensureNotesRef();
-      const commitsWithTraces = getCommitsWithTraces();
+      ensureNotesRef(root);
+      const commitsWithTraces = getCommitsWithTraces(root);
       traceCount = commitsWithTraces.length;
       
       if (traceCount > 0) {
