@@ -200,13 +200,23 @@
       font-weight: 600;
     }
 
+    .line-prefix {
+      width: 1rem;
+      padding: 0 0.5rem;
+      text-align: center;
+      color: #666;
+      user-select: none;
+      font-weight: 600;
+    }
+
     .line-number {
-      width: 3rem;
-      padding: 0 1rem;
+      width: 3.5rem;
+      padding: 0 0.75rem;
       text-align: right;
       color: #555;
       user-select: none;
       border-right: 1px solid #2a2a2a;
+      font-size: 0.8125rem;
     }
 
     .line-number.old {
@@ -221,25 +231,53 @@
       flex: 1;
       padding: 0 1rem;
       color: #e0e0e0;
+      white-space: pre;
     }
 
     .line-attribution {
-      width: 200px;
+      min-width: 180px;
       padding: 0 1rem;
       text-align: right;
       font-size: 0.75rem;
-      color: #888;
       border-left: 1px solid #2a2a2a;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
     }
 
-    .line-attribution.claude {
+    .attribution-badge {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.025em;
+    }
+
+    .attribution-badge.unknown {
+      background: rgba(107, 114, 128, 0.2);
+      color: #9ca3af;
+    }
+
+    .line-attribution.claude .attribution-badge {
+      background: rgba(217, 119, 6, 0.2);
       color: #d97706;
-      font-weight: 500;
     }
 
-    .line-attribution.gpt {
-      color: #059669;
-      font-weight: 500;
+    .line-attribution.gpt .attribution-badge {
+      background: rgba(5, 150, 105, 0.2);
+      color: #10b981;
+    }
+
+    .line-attribution.o3 .attribution-badge {
+      background: rgba(124, 58, 237, 0.2);
+      color: #a78bfa;
+    }
+
+    .line-attribution[data-type="human"] .attribution-badge {
+      background: rgba(16, 185, 129, 0.2);
+      color: #10b981;
     }
 
     .line-attribution:empty::before {
@@ -973,15 +1011,26 @@
                            lineData.type === 'removed' ? 'removed' : 
                            lineData.type === 'hunk' ? 'hunk' : 'context';
           
+          // Build attribution badge
           let attributionHtml = '';
           if (lineData.attribution) {
             const modelName = lineData.attribution.model.split('/').pop();
             const badgeClass = lineData.attribution.model.includes('claude') ? 'claude' : 
-                             lineData.attribution.model.includes('gpt') ? 'gpt' : '';
+                             lineData.attribution.model.includes('gpt') ? 'gpt' : 
+                             lineData.attribution.model.includes('o3') ? 'o3' : '';
             const contributorLabel = lineData.attribution.type === 'human' ? 'Human' : modelName;
-            attributionHtml = `<div class="line-attribution ${badgeClass}">${contributorLabel}</div>`;
-          } else if (lineData.type === 'added' || lineData.type === 'removed') {
-            attributionHtml = '<div class="line-attribution">-</div>';
+            const contributorType = lineData.attribution.type === 'human' ? 'human' : 'ai';
+            attributionHtml = `
+              <div class="line-attribution ${badgeClass}" data-type="${contributorType}">
+                <span class="attribution-badge">${contributorLabel}</span>
+              </div>
+            `;
+          } else if (lineData.type === 'added') {
+            // Added lines without attribution - might be human edits
+            attributionHtml = '<div class="line-attribution"><span class="attribution-badge unknown">Unknown</span></div>';
+          } else if (lineData.type === 'removed') {
+            // Removed lines don't have attribution
+            attributionHtml = '<div class="line-attribution"></div>';
           } else {
             attributionHtml = '<div class="line-attribution"></div>';
           }
@@ -989,8 +1038,16 @@
           const oldNum = lineData.oldNum !== null ? lineData.oldNum : '';
           const newNum = lineData.newNum !== null ? lineData.newNum : '';
           
+          // Add prefix indicator for diff lines
+          let prefix = '';
+          if (lineData.type === 'added') prefix = '+';
+          else if (lineData.type === 'removed') prefix = '-';
+          else if (lineData.type === 'hunk') prefix = '@';
+          else if (lineData.type === 'context') prefix = ' ';
+          
           return `
             <div class="code-line diff-line ${lineClass}">
+              <div class="line-prefix">${prefix}</div>
               <div class="line-number old">${oldNum}</div>
               <div class="line-number new">${newNum}</div>
               <div class="line-content">${escapeHtml(lineData.content)}</div>
