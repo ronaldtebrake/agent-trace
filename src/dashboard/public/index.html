@@ -452,9 +452,36 @@
 
     .trace-viewer-value.json {
       background: #1a1a1a;
-      padding: 1rem;
-      border-radius: 4px;
+      padding: 1.5rem;
+      border-radius: 6px;
       overflow-x: auto;
+      font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+      font-size: 0.875rem;
+      line-height: 1.6;
+      color: #e0e0e0;
+      white-space: pre;
+      border: 1px solid #2a2a2a;
+      max-height: 70vh;
+      overflow-y: auto;
+    }
+
+    .trace-viewer-value.json::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    .trace-viewer-value.json::-webkit-scrollbar-track {
+      background: #151515;
+      border-radius: 4px;
+    }
+
+    .trace-viewer-value.json::-webkit-scrollbar-thumb {
+      background: #444;
+      border-radius: 4px;
+    }
+
+    .trace-viewer-value.json::-webkit-scrollbar-thumb:hover {
+      background: #555;
     }
 
     .trace-file-item {
@@ -817,12 +844,13 @@
         }
         
         // Render trace contents as pretty-printed JSON array
+        const jsonString = JSON.stringify(traces, null, 2);
         rawContentEl.innerHTML = `
           <div class="trace-viewer-section">
             <h3>${commitMessage ? escapeHtml(commitMessage) : 'Trace Data'}</h3>
             <div class="trace-viewer-field">
-              <div class="trace-viewer-label">Trace Data (JSON Array)</div>
-              <div class="trace-viewer-value json">${JSON.stringify(traces, null, 2)}</div>
+              <div class="trace-viewer-label">Trace Data (${traces.length} ${traces.length === 1 ? 'trace' : 'traces'})</div>
+              <div class="trace-viewer-value json">${escapeHtml(jsonString)}</div>
             </div>
           </div>
         `;
@@ -987,8 +1015,17 @@
           return;
         }
 
+        // Fetch all traces for this commit so attribution is complete
+        let tracesForAttribution = [trace];
+        try {
+          const tracesRes = await fetch(`${API_BASE}/commits/${cleanSha}/traces`);
+          if (tracesRes.ok) {
+            const commitTraces = await tracesRes.json();
+            if (commitTraces?.length) tracesForAttribution = commitTraces;
+          }
+        } catch (_) { /* use single trace */ }
         // Parse diff and match with attribution
-        const diffWithAttribution = await parseDiffWithAttribution(diff, trace);
+        const diffWithAttribution = await parseDiffWithAttribution(diff, tracesForAttribution);
         
         viewEl.innerHTML = '';
         diffWithAttribution.forEach(fileDiff => {
@@ -1010,7 +1047,7 @@
       }
     }
 
-    async function parseDiffWithAttribution(diffText, trace) {
+    async function parseDiffWithAttribution(diffText, traceOrTraces) {
       const lines = diffText.split('\n');
       const files = [];
       let currentFile = null;
@@ -1019,39 +1056,34 @@
       let newLineNum = 0;
       let inHunk = false;
 
-      // Build attribution map from trace
+      const traces = Array.isArray(traceOrTraces) ? traceOrTraces : [traceOrTraces];
       const attributionMap = new Map(); // filePath -> Map(lineNum -> {model, modelId, type})
-      trace.files?.forEach(file => {
-        const fileMap = new Map();
-        file.conversations?.forEach(conv => {
-          const contributorType = conv.contributor?.type || 'unknown';
-          const modelId = conv.contributor?.model_id;
-          
-          // Extract model name from model_id
-          let modelName = null;
-          if (contributorType === 'ai' && modelId && typeof modelId === 'string' && modelId.trim()) {
-            const trimmedModelId = modelId.trim();
-            if (trimmedModelId.toLowerCase() === 'default') {
-              modelName = 'Auto';
-            } else if (trimmedModelId.includes('/')) {
-              const parts = trimmedModelId.split('/');
-              modelName = parts[parts.length - 1];
-            } else {
-              modelName = trimmedModelId;
-            }
-          }
-          
-          conv.ranges?.forEach(range => {
-            for (let i = range.start_line; i <= range.end_line; i++) {
-              fileMap.set(i, {
-                model: modelName,
-                modelId: modelId,
-                type: contributorType
-              });
-            }
+      traces.forEach(trace => {
+        trace.files?.forEach(file => {
+          if (!attributionMap.has(file.path)) attributionMap.set(file.path, new Map());
+          const fileMap = attributionMap.get(file.path);
+          file.conversations?.forEach(conv => {
+            conv.ranges?.forEach(range => {
+              const contrib = range.contributor ?? conv.contributor;
+              const contributorType = contrib?.type || conv.contributor?.type || 'unknown';
+              const modelId = contrib?.model_id ?? conv.contributor?.model_id;
+              let modelName = null;
+              if (contributorType === 'ai') {
+                if (modelId && typeof modelId === 'string' && modelId.trim()) {
+                  const trimmedModelId = modelId.trim();
+                  if (trimmedModelId.toLowerCase() === 'default') modelName = 'Auto';
+                  else if (trimmedModelId.includes('/')) modelName = trimmedModelId.split('/').pop();
+                  else modelName = trimmedModelId;
+                } else {
+                  modelName = 'Auto';
+                }
+              }
+              for (let i = range.start_line; i <= range.end_line; i++) {
+                fileMap.set(i, { model: modelName, modelId: modelId || null, type: contributorType });
+              }
+            });
           });
         });
-        attributionMap.set(file.path, fileMap);
       });
 
       for (let i = 0; i < lines.length; i++) {
@@ -1187,10 +1219,11 @@
                   <span class="attribution-badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981;">Human</span>
                 </div>
               `;
-            } else if (model) {
-              // AI with model name
+            } else if (contributorType === 'ai') {
+              // AI: use model name or fallback to Auto
+              const displayName = (model && model.trim()) ? model : 'Auto';
               let badgeClass = '';
-              if (model.toLowerCase() === 'auto') {
+              if (displayName.toLowerCase() === 'auto') {
                 badgeClass = 'default';
               } else if (modelId && modelId.includes('claude')) {
                 badgeClass = 'claude';
@@ -1199,19 +1232,16 @@
               } else if (modelId && modelId.includes('o3')) {
                 badgeClass = 'o3';
               }
-              
               attributionHtml = `
                 <div class="line-attribution ${badgeClass}" data-type="ai">
-                  <span class="attribution-badge" style="background: rgba(139, 92, 246, 0.2); color: #a78bfa;">${escapeHtml(model)}</span>
+                  <span class="attribution-badge" style="background: rgba(139, 92, 246, 0.2); color: #a78bfa;">${escapeHtml(displayName)}</span>
                 </div>
               `;
             } else {
-              // AI but no model info - show as unknown
               attributionHtml = '<div class="line-attribution"><span class="attribution-badge unknown">Unknown</span></div>';
             }
           } else if (lineData.type === 'added') {
-            // Added lines without attribution - might be human edits
-            attributionHtml = '<div class="line-attribution"><span class="attribution-badge unknown">Unknown</span></div>';
+            attributionHtml = '<div class="line-attribution"><span class="attribution-badge default">Auto</span></div>';
           } else if (lineData.type === 'removed') {
             // Removed lines don't have attribution
             attributionHtml = '<div class="line-attribution"></div>';
@@ -1243,16 +1273,20 @@
     }
 
     async function generateCodeLines(file) {
-      // Get all ranges and their attributions
       const lineMap = new Map();
       file.conversations?.forEach(conv => {
         conv.ranges?.forEach(range => {
+          const contrib = range.contributor ?? conv.contributor;
+          const modelId = contrib?.model_id ?? conv.contributor?.model_id;
+          const type = contrib?.type ?? conv.contributor?.type ?? 'unknown';
+          const modelDisplay = (type === 'ai' && (!modelId || modelId === 'unknown')) ? 'Auto' : undefined;
           for (let i = range.start_line; i <= range.end_line; i++) {
             if (!lineMap.has(i)) {
               lineMap.set(i, {
                 number: i,
-                model: conv.contributor?.model_id || 'unknown',
-                type: conv.contributor?.type || 'unknown',
+                model: modelId || 'unknown',
+                modelDisplay: modelDisplay,
+                type: type,
                 content: null
               });
             }
@@ -1282,17 +1316,16 @@
         }
       }
 
-      // Generate code lines
       const sortedLines = Array.from(lineMap.values()).sort((a, b) => a.number - b.number);
       return sortedLines.map(line => {
-        const modelName = line.model.split('/').pop();
-        const badgeClass = line.model.includes('claude') ? 'claude' : line.model.includes('gpt') ? 'gpt' : '';
+        const modelName = line.modelDisplay != null ? line.modelDisplay : (line.model.includes('/') ? line.model.split('/').pop() : line.model);
+        const badgeClass = line.model.includes('claude') ? 'claude' : line.model.includes('gpt') ? 'gpt' : (modelName === 'Auto' ? 'default' : '');
         const content = line.content !== null ? escapeHtml(line.content) : `// Line ${line.number}`;
         return `
           <div class="code-line">
             <div class="line-number">${line.number}</div>
             <div class="line-content">${content}</div>
-            <div class="line-attribution ${badgeClass}">${modelName}</div>
+            <div class="line-attribution ${badgeClass}">${escapeHtml(modelName)}</div>
           </div>
         `;
       }).join('');
