@@ -246,3 +246,74 @@ export function getFileAttribution(
 
   return attribution;
 }
+
+/**
+ * Get raw git notes content for a commit
+ */
+export function getRawNotes(commitSha: string): string {
+  const root = getWorkspaceRoot();
+  try {
+    const noteContent = execFileSync(
+      "git",
+      ["notes", "--ref", "refs/notes/agent-trace", "show", commitSha],
+      { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+    ).trim();
+    return noteContent;
+  } catch (error: any) {
+    if (error.status === 128 || error.code === 128) {
+      return ""; // Note doesn't exist
+    }
+    throw error;
+  }
+}
+
+/**
+ * Get git diff for a commit
+ */
+export function getCommitDiff(commitSha: string): string {
+  const root = getWorkspaceRoot();
+  try {
+    // Get parent commit
+    const parentSha = execFileSync(
+      "git",
+      ["rev-parse", `${commitSha}^`],
+      { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+    ).trim();
+    
+    const diff = execFileSync(
+      "git",
+      ["diff", parentSha, commitSha],
+      { cwd: root, encoding: "utf-8" }
+    );
+    return diff;
+  } catch (error: any) {
+    // If no parent (initial commit), show diff against empty tree
+    try {
+      const diff = execFileSync(
+        "git",
+        ["show", commitSha, "--format="],
+        { cwd: root, encoding: "utf-8" }
+      );
+      return diff;
+    } catch {
+      return `Error: Could not get diff for commit ${commitSha}`;
+    }
+  }
+}
+
+/**
+ * Get file content at a specific commit
+ */
+export function getFileContent(commitSha: string, filePath: string): string {
+  const root = getWorkspaceRoot();
+  try {
+    const content = execFileSync(
+      "git",
+      ["show", `${commitSha}:${filePath}`],
+      { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+    );
+    return content;
+  } catch (error: any) {
+    return `Error: Could not read file ${filePath} at commit ${commitSha}`;
+  }
+}

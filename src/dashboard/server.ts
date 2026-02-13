@@ -3,7 +3,7 @@ import { parse } from "url";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { getDashboardStats, getCommitTraces, getFileAttribution } from "./api.js";
+import { getDashboardStats, getCommitTraces, getFileAttribution, getRawNotes, getCommitDiff, getFileContent } from "./api.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -55,6 +55,24 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       );
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(attribution));
+    } else if (path.startsWith("/api/commits/") && path.endsWith("/raw-notes")) {
+      const commitSha = path.split("/")[3];
+      const rawNotes = getRawNotes(commitSha);
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(rawNotes);
+    } else if (path.startsWith("/api/commits/") && path.endsWith("/diff")) {
+      const commitSha = path.split("/")[3];
+      const diff = getCommitDiff(commitSha);
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(diff);
+    } else if (path.startsWith("/api/commits/") && path.includes("/files/")) {
+      // /api/commits/{sha}/files/{path}
+      const parts = path.split("/");
+      const commitSha = parts[3];
+      const filePath = decodeURIComponent(parts.slice(5).join("/"));
+      const content = getFileContent(commitSha, filePath);
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(content);
     } else if (path === "/api/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));

@@ -283,6 +283,95 @@
       height: 100%;
       color: #666;
     }
+
+    .tabs {
+      display: flex;
+      background: #151515;
+      border-bottom: 1px solid #2a2a2a;
+      padding: 0 1rem;
+    }
+
+    .tab {
+      padding: 0.75rem 1.5rem;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #888;
+      cursor: pointer;
+      font-size: 0.875rem;
+      transition: all 0.2s;
+    }
+
+    .tab:hover {
+      color: #e0e0e0;
+    }
+
+    .tab.active {
+      color: #fff;
+      border-bottom-color: #8b5cf6;
+    }
+
+    .tab-content {
+      display: none;
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .tab-content.active {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .raw-content {
+      padding: 1.5rem;
+      font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+      font-size: 0.875rem;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      overflow-x: auto;
+    }
+
+    .diff-content {
+      padding: 1.5rem;
+      font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+      font-size: 0.875rem;
+      white-space: pre;
+      word-wrap: break-word;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      overflow-x: auto;
+    }
+
+    .diff-line {
+      padding: 0.125rem 0.5rem;
+      display: flex;
+    }
+
+    .diff-line.added {
+      background: rgba(16, 185, 129, 0.1);
+    }
+
+    .diff-line.removed {
+      background: rgba(239, 68, 68, 0.1);
+    }
+
+    .diff-line.context {
+      color: #666;
+    }
+
+    .diff-line-number {
+      width: 60px;
+      text-align: right;
+      padding-right: 1rem;
+      color: #666;
+      user-select: none;
+    }
+
+    .diff-line-content {
+      flex: 1;
+    }
   </style>
 </head>
 <body>
@@ -317,8 +406,30 @@
     </div>
 
     <div class="content-area">
-      <div class="code-view" id="code-view">
-        <div class="loading">Select a trace record to view details</div>
+      <div style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
+        <div class="tabs" id="tabs" style="display: none;">
+          <button class="tab active" data-tab="code">Code View</button>
+          <button class="tab" data-tab="raw">Raw Notes</button>
+          <button class="tab" data-tab="diff">Diff</button>
+        </div>
+        
+        <div class="tab-content active" id="tab-code">
+          <div class="code-view" id="code-view">
+            <div class="loading">Select a trace record to view details</div>
+          </div>
+        </div>
+        
+        <div class="tab-content" id="tab-raw">
+          <div class="raw-content" id="raw-content">
+            <div class="loading">Select a trace record to view raw notes</div>
+          </div>
+        </div>
+        
+        <div class="tab-content" id="tab-diff">
+          <div class="diff-content" id="diff-content">
+            <div class="loading">Select a trace record to view diff</div>
+          </div>
+        </div>
       </div>
 
       <div class="details-panel" id="details-panel">
@@ -332,6 +443,38 @@
 
     let traces = [];
     let selectedTrace = null;
+    let currentTab = 'code';
+
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const tabName = tab.dataset.tab;
+        switchTab(tabName);
+      });
+    });
+
+    function switchTab(tabName) {
+      currentTab = tabName;
+      
+      // Update tab buttons
+      document.querySelectorAll('.tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === tabName);
+      });
+      
+      // Update tab content
+      document.querySelectorAll('.tab-content').forEach(c => {
+        c.classList.toggle('active', c.id === `tab-${tabName}`);
+      });
+      
+      // Load content for the selected tab
+      if (selectedTrace) {
+        if (tabName === 'raw') {
+          loadRawNotes();
+        } else if (tabName === 'diff') {
+          loadDiff();
+        }
+      }
+    }
 
     async function loadStats() {
       try {
@@ -440,54 +583,181 @@
       renderTraceList();
       renderCodeView(trace);
       renderDetails(trace);
+      
+      // Show tabs when a trace is selected
+      document.getElementById('tabs').style.display = 'flex';
+      
+      // Load content for current tab
+      if (currentTab === 'raw') {
+        loadRawNotes();
+      } else if (currentTab === 'diff') {
+        loadDiff();
+      }
     }
 
-    function renderCodeView(trace) {
-      const viewEl = document.getElementById('code-view');
-      viewEl.innerHTML = '';
+    async function loadRawNotes() {
+      if (!selectedTrace?.vcs?.revision) {
+        document.getElementById('raw-content').textContent = 'No commit SHA available';
+        return;
+      }
+      
+      try {
+        const commitSha = selectedTrace.vcs.revision;
+        const res = await fetch(`${API_BASE}/commits/${commitSha}/raw-notes`);
+        const rawNotes = await res.text();
+        
+        // Try to format as JSON if possible
+        let formatted = rawNotes;
+        try {
+          const parsed = JSON.parse(rawNotes);
+          formatted = JSON.stringify(parsed, null, 2);
+        } catch {
+          // Not JSON, use as-is
+        }
+        
+        document.getElementById('raw-content').textContent = formatted || 'No notes found';
+      } catch (error) {
+        document.getElementById('raw-content').textContent = `Error loading raw notes: ${error.message}`;
+      }
+    }
 
-      trace.files?.forEach(file => {
+    async function loadDiff() {
+      if (!selectedTrace?.vcs?.revision) {
+        document.getElementById('diff-content').textContent = 'No commit SHA available';
+        return;
+      }
+      
+      try {
+        const commitSha = selectedTrace.vcs.revision;
+        const res = await fetch(`${API_BASE}/commits/${commitSha}/diff`);
+        const diff = await res.text();
+        
+        // Render diff with syntax highlighting
+        const diffEl = document.getElementById('diff-content');
+        diffEl.innerHTML = '';
+        
+        if (!diff || diff.trim() === '') {
+          diffEl.textContent = 'No diff available';
+          return;
+        }
+        
+        const lines = diff.split('\n');
+        lines.forEach((line, index) => {
+          const lineEl = document.createElement('div');
+          lineEl.className = 'diff-line';
+          
+          if (line.startsWith('+++') || line.startsWith('---')) {
+            lineEl.classList.add('context');
+          } else if (line.startsWith('+') && !line.startsWith('+++')) {
+            lineEl.classList.add('added');
+          } else if (line.startsWith('-') && !line.startsWith('---')) {
+            lineEl.classList.add('removed');
+          } else if (line.startsWith('@@')) {
+            lineEl.classList.add('context');
+          } else {
+            lineEl.classList.add('context');
+          }
+          
+          const lineNumEl = document.createElement('span');
+          lineNumEl.className = 'diff-line-number';
+          lineNumEl.textContent = index + 1;
+          
+          const contentEl = document.createElement('span');
+          contentEl.className = 'diff-line-content';
+          contentEl.textContent = line;
+          
+          lineEl.appendChild(lineNumEl);
+          lineEl.appendChild(contentEl);
+          diffEl.appendChild(lineEl);
+        });
+      } catch (error) {
+        document.getElementById('diff-content').textContent = `Error loading diff: ${error.message}`;
+      }
+    }
+
+    async function renderCodeView(trace) {
+      const viewEl = document.getElementById('code-view');
+      viewEl.innerHTML = '<div class="loading">Loading code...</div>';
+
+      const filePromises = trace.files?.map(async (file) => {
         const fileDiv = document.createElement('div');
         fileDiv.className = 'code-file';
+        
+        const codeLines = await generateCodeLines(file);
         
         fileDiv.innerHTML = `
           <div class="code-file-header">${file.path}</div>
           <div class="code-block">
-            ${generateCodeLines(file)}
+            ${codeLines}
           </div>
         `;
         
-        viewEl.appendChild(fileDiv);
-      });
+        return fileDiv;
+      }) || [];
+
+      const fileDivs = await Promise.all(filePromises);
+      viewEl.innerHTML = '';
+      fileDivs.forEach(div => viewEl.appendChild(div));
     }
 
-    function generateCodeLines(file) {
+    async function generateCodeLines(file) {
       // Get all ranges and their attributions
-      const lines = [];
+      const lineMap = new Map();
       file.conversations?.forEach(conv => {
         conv.ranges?.forEach(range => {
           for (let i = range.start_line; i <= range.end_line; i++) {
-            lines.push({
-              number: i,
-              model: conv.contributor?.model_id || 'unknown',
-              type: conv.contributor?.type || 'unknown'
-            });
+            if (!lineMap.has(i)) {
+              lineMap.set(i, {
+                number: i,
+                model: conv.contributor?.model_id || 'unknown',
+                type: conv.contributor?.type || 'unknown',
+                content: null
+              });
+            }
           }
         });
       });
 
-      // Generate code lines (simplified - in real implementation, fetch actual code)
-      return lines.map(line => {
+      // Fetch actual file content if we have a commit SHA
+      if (selectedTrace?.vcs?.revision) {
+        try {
+          const commitSha = selectedTrace.vcs.revision;
+          const res = await fetch(`${API_BASE}/commits/${commitSha}/files/${encodeURIComponent(file.path)}`);
+          const content = await res.text();
+          
+          if (content && !content.startsWith('Error:')) {
+            const fileLines = content.split('\n');
+            lineMap.forEach((line, num) => {
+              if (num >= 1 && num <= fileLines.length) {
+                line.content = fileLines[num - 1] || '';
+              }
+            });
+          }
+        } catch (error) {
+          console.warn('Failed to fetch file content:', error);
+        }
+      }
+
+      // Generate code lines
+      const sortedLines = Array.from(lineMap.values()).sort((a, b) => a.number - b.number);
+      return sortedLines.map(line => {
         const modelName = line.model.split('/').pop();
         const badgeClass = line.model.includes('claude') ? 'claude' : line.model.includes('gpt') ? 'gpt' : '';
+        const content = line.content !== null ? escapeHtml(line.content) : `// Line ${line.number}`;
         return `
           <div class="code-line">
             <div class="line-number">${line.number}</div>
-            <div class="line-content">// Code line ${line.number}</div>
+            <div class="line-content">${content}</div>
             <div class="line-attribution ${badgeClass}">${modelName}</div>
           </div>
         `;
       }).join('');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
     }
 
     function renderDetails(trace) {
