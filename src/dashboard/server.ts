@@ -3,7 +3,7 @@ import { parse } from "url";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { getDashboardStats, getCommitTraces, getFileAttribution, getRawNotes, getCommitDiff, getFileContent } from "./api.js";
+import { getDashboardStats, getCommitTraces, getFileAttribution, getRawNotes, getCommitDiff, getFileContent, getCommitMessage } from "./api.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -82,6 +82,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       } catch (error: any) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Internal error", message: error.message }));
+      }
+    } else if (path.startsWith("/api/commits/") && path.endsWith("/message")) {
+      const commitSha = path.split("/")[3];
+      try {
+        const message = getCommitMessage(commitSha);
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(message);
+      } catch (error: any) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Not found", message: error.message }));
       }
     } else if (path.startsWith("/api/commits/") && path.includes("/files/")) {
       // /api/commits/{sha}/files/{path}

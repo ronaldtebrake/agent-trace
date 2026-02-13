@@ -790,49 +790,52 @@
         const commitSha = selectedTrace?._commitSha || selectedTrace?.vcs?.revision;
         
         let traces = [selectedTrace];
+        let commitMessage = null;
         
-        // If we have a commit SHA, try to fetch all traces for that commit
+        // If we have a commit SHA, fetch commit message and all traces for that commit
         if (commitSha) {
           try {
             const cleanSha = commitSha.split('.')[0].trim();
-            const res = await fetch(`${API_BASE}/commits/${cleanSha}/traces`);
-            if (res.ok) {
-              const commitTraces = await res.json();
+            
+            // Fetch commit message
+            const messageRes = await fetch(`${API_BASE}/commits/${cleanSha}/message`);
+            if (messageRes.ok) {
+              commitMessage = await messageRes.text();
+            }
+            
+            // Fetch all traces for this commit
+            const tracesRes = await fetch(`${API_BASE}/commits/${cleanSha}/traces`);
+            if (tracesRes.ok) {
+              const commitTraces = await tracesRes.json();
               if (commitTraces && commitTraces.length > 0) {
                 traces = commitTraces;
               }
             }
           } catch (error) {
-            console.warn('Could not fetch all traces for commit, using selected trace only:', error);
+            console.warn('Could not fetch commit info, using selected trace only:', error);
           }
         }
         
         // Render trace contents in a readable format
-        rawContentEl.innerHTML = traces.map((trace, index) => renderTraceContent(trace, index)).join('');
+        rawContentEl.innerHTML = traces.map((trace, index) => renderTraceContent(trace, index, commitMessage)).join('');
       } catch (error) {
         rawContentEl.innerHTML = `<div class="loading">Error loading trace contents: ${error.message || error}</div>`;
         console.error('Raw notes error:', error);
       }
     }
 
-    function renderTraceContent(trace, index) {
+    function renderTraceContent(trace, index, commitMessage) {
       const date = new Date(trace.timestamp);
-      const modelBadges = new Set();
-      let totalRanges = 0;
-      
-      trace.files?.forEach(file => {
-        file.conversations?.forEach(conv => {
-          if (conv.contributor?.model_id) {
-            const model = conv.contributor.model_id.toLowerCase() === 'default' ? 'Auto' : conv.contributor.model_id;
-            modelBadges.add(model);
-          }
-          totalRanges += conv.ranges?.length || 0;
-        });
-      });
+      const title = commitMessage || trace.metadata?.scenario || `Trace ${index + 1}: ${trace.id.substring(0, 8)}...`;
 
       return `
         <div class="trace-viewer-section">
-          <h3>Trace ${index + 1}: ${trace.id.substring(0, 8)}...</h3>
+          <h3>${escapeHtml(title)}</h3>
+          
+          <div class="trace-viewer-field">
+            <div class="trace-viewer-label">Trace ID</div>
+            <div class="trace-viewer-value" style="font-family: monospace; font-size: 0.75rem;">${trace.id}</div>
+          </div>
           
           <div class="trace-viewer-field">
             <div class="trace-viewer-label">Timestamp</div>
@@ -857,42 +860,7 @@
           ` : ''}
           
           <div class="trace-viewer-field">
-            <div class="trace-viewer-label">Files (${trace.files?.length || 0})</div>
-            ${trace.files?.map(file => `
-              <div class="trace-file-item">
-                <div class="trace-file-path">${escapeHtml(file.path)}</div>
-                ${file.conversations?.map(conv => {
-                  const modelId = conv.contributor?.model_id || 'unknown';
-                  const modelName = modelId.toLowerCase() === 'default' ? 'Auto' : modelId.split('/').pop();
-                  const contributorType = conv.contributor?.type || 'unknown';
-                  const badgeClass = contributorType === 'human' ? 'human' : 'ai';
-                  
-                  return `
-                    <div class="trace-conversation-item ${badgeClass}">
-                      <div style="margin-bottom: 0.5rem;">
-                        <strong>Contributor:</strong> ${contributorType === 'human' ? 'Human' : 'AI'}
-                        ${modelId && modelId !== 'unknown' && modelId !== 'default' ? ` (${modelName})` : modelId === 'default' ? ' (Auto)' : ''}
-                      </div>
-                      ${conv.url ? `<div style="margin-bottom: 0.5rem; font-size: 0.75rem; color: #888;">URL: ${escapeHtml(conv.url)}</div>` : ''}
-                      <div style="margin-bottom: 0.5rem;">
-                        <strong>Ranges:</strong>
-                        <div style="margin-top: 0.5rem;">
-                          ${conv.ranges?.map(range => `
-                            <span class="trace-range-item">
-                              Lines ${range.start_line}-${range.end_line}
-                            </span>
-                          `).join('') || 'No ranges'}
-                        </div>
-                      </div>
-                    </div>
-                  `;
-                }).join('') || '<div style="color: #888;">No conversations</div>'}
-              </div>
-            `).join('') || '<div style="color: #888;">No files</div>'}
-          </div>
-          
-          <div class="trace-viewer-field">
-            <div class="trace-viewer-label">Raw JSON</div>
+            <div class="trace-viewer-label">Trace Data (JSON)</div>
             <div class="trace-viewer-value json">${JSON.stringify(trace, null, 2)}</div>
           </div>
         </div>

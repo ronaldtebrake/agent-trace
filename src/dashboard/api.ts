@@ -327,6 +327,35 @@ export function getCommitDiff(commitSha: string): string {
 }
 
 /**
+ * Get commit message for a commit
+ */
+export function getCommitMessage(commitSha: string): string {
+  const root = getWorkspaceRoot();
+  try {
+    // Try to resolve the commit SHA first (handles short SHAs)
+    let resolvedSha = commitSha;
+    try {
+      resolvedSha = execFileSync(
+        "git",
+        ["rev-parse", commitSha],
+        { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+      ).trim();
+    } catch {
+      // If rev-parse fails, use the original SHA
+    }
+    
+    const message = execFileSync(
+      "git",
+      ["log", "-1", "--format=%s", resolvedSha],
+      { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+    ).trim();
+    return message;
+  } catch (error: any) {
+    return `Commit ${commitSha.substring(0, 8)}`;
+  }
+}
+
+/**
  * Get file content at a specific commit
  */
 export function getFileContent(commitSha: string, filePath: string): string {
