@@ -699,10 +699,11 @@
           const tracePromises = stats.commits.map(async (commit) => {
             const traceRes = await fetch(`${API_BASE}/commits/${commit.sha}/traces`);
             const commitTraces = await traceRes.json();
-            // Attach commit SHA to each trace for later use
+            // Attach commit SHA and message to each trace for later use
             return commitTraces.map(trace => ({
               ...trace,
-              _commitSha: commit.sha // Store commit SHA for API calls
+              _commitSha: commit.sha,
+              _commitMessage: commit.message || null
             }));
           });
           
@@ -755,7 +756,7 @@
         }
         
         const date = new Date(trace.timestamp);
-        const title = trace.metadata?.scenario || `Trace ${index + 1}`;
+        const title = trace._commitMessage || trace.metadata?.scenario || `Trace ${index + 1}`;
         const fileCount = trace.files?.length || 0;
         const models = new Set();
         trace.files?.forEach(f => {
