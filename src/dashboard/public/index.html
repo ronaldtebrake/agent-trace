@@ -619,16 +619,25 @@
       rawContentEl.textContent = 'Loading...';
       
       try {
-        const res = await fetch(`${API_BASE}/commits/${commitSha}/raw-notes`);
+        // Clean commit SHA (remove any trailing dots or extra characters)
+        const cleanSha = commitSha.split('.')[0].trim();
+        const url = `${API_BASE}/commits/${cleanSha}/raw-notes`;
+        
+        console.log('Fetching raw notes from:', url);
+        const res = await fetch(url);
         const contentType = res.headers.get('content-type') || '';
         
         if (!res.ok) {
-          if (contentType.includes('application/json')) {
-            const error = await res.json();
-            rawContentEl.textContent = `Error: ${error.error || error.message || 'Not found'}`;
-          } else {
-            rawContentEl.textContent = `Error: HTTP ${res.status} ${res.statusText}`;
+          const errorText = await res.text();
+          let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorMsg = errorJson.error || errorJson.message || errorMsg;
+          } catch {
+            if (errorText) errorMsg += `\n${errorText}`;
           }
+          rawContentEl.textContent = `Error: ${errorMsg}`;
+          console.error('Raw notes fetch error:', errorMsg);
           return;
         }
         
@@ -664,16 +673,32 @@
         return;
       }
       
+      const diffEl = document.getElementById('diff-content');
+      diffEl.innerHTML = '<div class="loading">Loading diff...</div>';
+      
       try {
-        const res = await fetch(`${API_BASE}/commits/${commitSha}/diff`);
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-        }
-        const diff = await res.text();
+        // Clean commit SHA (remove any trailing dots or extra characters)
+        const cleanSha = commitSha.split('.')[0].trim();
+        const url = `${API_BASE}/commits/${cleanSha}/diff`;
         
-        // Render diff with syntax highlighting
-        const diffEl = document.getElementById('diff-content');
-        diffEl.innerHTML = '';
+        console.log('Fetching diff from:', url);
+        const res = await fetch(url);
+        const contentType = res.headers.get('content-type') || '';
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
+          try {
+            const errorJson = JSON.parse(errorText);
+            errorMsg = errorJson.error || errorJson.message || errorMsg;
+          } catch {
+            if (errorText) errorMsg += `\n${errorText}`;
+          }
+          diffEl.textContent = `Error: ${errorMsg}`;
+          return;
+        }
+        
+        const diff = await res.text();
         
         if (!diff || diff.trim() === '') {
           diffEl.textContent = 'No diff available for this commit';
@@ -685,6 +710,9 @@
           diffEl.textContent = diff;
           return;
         }
+        
+        // Render diff with syntax highlighting
+        diffEl.innerHTML = '';
         
         const lines = diff.split('\n');
         lines.forEach((line, index) => {
@@ -716,7 +744,7 @@
           diffEl.appendChild(lineEl);
         });
       } catch (error) {
-        document.getElementById('diff-content').textContent = `Error loading diff: ${error.message || error}`;
+        diffEl.textContent = `Error loading diff: ${error.message || error}`;
         console.error('Diff error:', error);
       }
     }

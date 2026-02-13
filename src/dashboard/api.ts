@@ -253,9 +253,21 @@ export function getFileAttribution(
 export function getRawNotes(commitSha: string): string {
   const root = getWorkspaceRoot();
   try {
+    // Try to resolve the commit SHA first (handles short SHAs)
+    let resolvedSha = commitSha;
+    try {
+      resolvedSha = execFileSync(
+        "git",
+        ["rev-parse", commitSha],
+        { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+      ).trim();
+    } catch {
+      // If rev-parse fails, use the original SHA
+    }
+    
     const noteContent = execFileSync(
       "git",
-      ["notes", "--ref", "refs/notes/agent-trace", "show", commitSha],
+      ["notes", "--ref", "refs/notes/agent-trace", "show", resolvedSha],
       { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
     ).trim();
     return noteContent;

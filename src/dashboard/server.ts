@@ -14,6 +14,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   const parsedUrl = parse(req.url || "/", true);
   const path = parsedUrl.pathname || "/";
   const query = parsedUrl.query || {};
+  
+  // Debug logging (can be removed in production)
+  if (process.env.DEBUG) {
+    console.log(`[${req.method}] ${path}`);
+  }
 
   // CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -56,12 +61,20 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(attribution));
     } else if (path.startsWith("/api/commits/") && path.endsWith("/raw-notes")) {
-      const commitSha = path.split("/")[3];
+      const parts = path.split("/");
+      const commitSha = parts[3];
+      
+      if (!commitSha || commitSha === "raw-notes") {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid commit SHA" }));
+        return;
+      }
+      
       try {
         const rawNotes = getRawNotes(commitSha);
         if (rawNotes === "") {
           res.writeHead(404, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Not found" }));
+          res.end(JSON.stringify({ error: "Not found", message: `No git notes found for commit ${commitSha}` }));
         } else {
           res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
           res.end(rawNotes);
@@ -69,16 +82,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       } catch (error: any) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Internal error", message: error.message }));
-      }
-    } else if (path.startsWith("/api/commits/") && path.endsWith("/diff")) {
-      const commitSha = path.split("/")[3];
-      try {
-        const diff = getCommitDiff(commitSha);
-        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-        res.end(diff);
-      } catch (error: any) {
-        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
-        res.end(`Error: ${error.message || error}`);
       }
     } else if (path.startsWith("/api/commits/") && path.includes("/files/")) {
       // /api/commits/{sha}/files/{path}
@@ -92,6 +95,25 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       } catch (error: any) {
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Not found", message: error.message }));
+      }
+    } else if (path.startsWith("/api/commits/") && path.endsWith("/diff")) {
+      // Must come after /files/ check to avoid conflicts
+      const parts = path.split("/");
+      const commitSha = parts[3];
+      
+      if (!commitSha || commitSha === "diff") {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid commit SHA" }));
+        return;
+      }
+      
+      try {
+        const diff = getCommitDiff(commitSha);
+        res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(diff);
+      } catch (error: any) {
+        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(`Error: ${error.message || error}`);
       }
     } else if (path === "/api/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
