@@ -285,31 +285,44 @@ export function getRawNotes(commitSha: string): string {
 export function getCommitDiff(commitSha: string): string {
   const root = getWorkspaceRoot();
   try {
+    // Try to resolve the commit SHA first (handles short SHAs)
+    let resolvedSha = commitSha;
+    try {
+      resolvedSha = execFileSync(
+        "git",
+        ["rev-parse", commitSha],
+        { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+      ).trim();
+    } catch {
+      throw new Error(`Commit not found: ${commitSha}`);
+    }
+    
     // Get parent commit
-    const parentSha = execFileSync(
-      "git",
-      ["rev-parse", `${commitSha}^`],
-      { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
-    ).trim();
+    let parentSha: string;
+    try {
+      parentSha = execFileSync(
+        "git",
+        ["rev-parse", `${resolvedSha}^`],
+        { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+      ).trim();
+    } catch {
+      // If no parent (initial commit), show diff against empty tree
+      const diff = execFileSync(
+        "git",
+        ["show", resolvedSha, "--format="],
+        { cwd: root, encoding: "utf-8" }
+      );
+      return diff;
+    }
     
     const diff = execFileSync(
       "git",
-      ["diff", parentSha, commitSha],
+      ["diff", parentSha, resolvedSha],
       { cwd: root, encoding: "utf-8" }
     );
     return diff;
   } catch (error: any) {
-    // If no parent (initial commit), show diff against empty tree
-    try {
-      const diff = execFileSync(
-        "git",
-        ["show", commitSha, "--format="],
-        { cwd: root, encoding: "utf-8" }
-      );
-      return diff;
-    } catch {
-      return `Error: Could not get diff for commit ${commitSha}`;
-    }
+    throw new Error(`Could not get diff for commit ${commitSha}: ${error.message || error}`);
   }
 }
 
@@ -319,13 +332,28 @@ export function getCommitDiff(commitSha: string): string {
 export function getFileContent(commitSha: string, filePath: string): string {
   const root = getWorkspaceRoot();
   try {
+    // Try to resolve the commit SHA first (handles short SHAs)
+    let resolvedSha = commitSha;
+    try {
+      resolvedSha = execFileSync(
+        "git",
+        ["rev-parse", commitSha],
+        { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+      ).trim();
+    } catch {
+      // If rev-parse fails, use the original SHA
+    }
+    
     const content = execFileSync(
       "git",
-      ["show", `${commitSha}:${filePath}`],
+      ["show", `${resolvedSha}:${filePath}`],
       { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
     );
     return content;
   } catch (error: any) {
-    return `Error: Could not read file ${filePath} at commit ${commitSha}`;
+    if (error.status === 128 || error.code === 128 || error.status === 1) {
+      throw new Error(`File not found: ${filePath} at commit ${commitSha}`);
+    }
+    throw new Error(`Could not read file ${filePath} at commit ${commitSha}: ${error.message || error}`);
   }
 }
