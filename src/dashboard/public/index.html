@@ -186,6 +186,20 @@
       line-height: 1.6;
     }
 
+    .code-line.diff-line.added {
+      background: rgba(16, 185, 129, 0.1);
+    }
+
+    .code-line.diff-line.removed {
+      background: rgba(239, 68, 68, 0.1);
+    }
+
+    .code-line.diff-line.hunk {
+      background: rgba(139, 92, 246, 0.1);
+      color: #888;
+      font-weight: 600;
+    }
+
     .line-number {
       width: 3rem;
       padding: 0 1rem;
@@ -193,6 +207,14 @@
       color: #555;
       user-select: none;
       border-right: 1px solid #2a2a2a;
+    }
+
+    .line-number.old {
+      color: #ef4444;
+    }
+
+    .line-number.new {
+      color: #10b981;
     }
 
     .line-content {
@@ -212,10 +234,16 @@
 
     .line-attribution.claude {
       color: #d97706;
+      font-weight: 500;
     }
 
     .line-attribution.gpt {
       color: #059669;
+      font-weight: 500;
+    }
+
+    .line-attribution:empty::before {
+      content: '\00a0'; /* Non-breaking space */
     }
 
     .details-panel {
@@ -751,27 +779,226 @@
 
     async function renderCodeView(trace) {
       const viewEl = document.getElementById('code-view');
-      viewEl.innerHTML = '<div class="loading">Loading code...</div>';
+      viewEl.innerHTML = '<div class="loading">Loading diff with attribution...</div>';
 
-      const filePromises = trace.files?.map(async (file) => {
-        const fileDiv = document.createElement('div');
-        fileDiv.className = 'code-file';
-        
-        const codeLines = await generateCodeLines(file);
-        
-        fileDiv.innerHTML = `
-          <div class="code-file-header">${file.path}</div>
-          <div class="code-block">
-            ${codeLines}
-          </div>
-        `;
-        
-        return fileDiv;
-      }) || [];
+      // Get commit SHA
+      const commitSha = trace?._commitSha || trace?.vcs?.revision;
+      if (!commitSha) {
+        viewEl.innerHTML = '<div class="loading">No commit SHA available</div>';
+        return;
+      }
 
-      const fileDivs = await Promise.all(filePromises);
-      viewEl.innerHTML = '';
-      fileDivs.forEach(div => viewEl.appendChild(div));
+      // Fetch diff
+      try {
+        const cleanSha = commitSha.split('.')[0].trim();
+        const diffRes = await fetch(`${API_BASE}/commits/${cleanSha}/diff`);
+        
+        if (!diffRes.ok) {
+          viewEl.innerHTML = '<div class="loading">Could not load diff</div>';
+          return;
+        }
+        
+        const diff = await diffRes.text();
+        if (!diff || diff.trim() === '' || diff.startsWith('Error:')) {
+          viewEl.innerHTML = '<div class="loading">No diff available</div>';
+          return;
+        }
+
+        // Parse diff and match with attribution
+        const diffWithAttribution = await parseDiffWithAttribution(diff, trace);
+        
+        viewEl.innerHTML = '';
+        diffWithAttribution.forEach(fileDiff => {
+          const fileDiv = document.createElement('div');
+          fileDiv.className = 'code-file';
+          
+          fileDiv.innerHTML = `
+            <div class="code-file-header">${fileDiff.path}</div>
+            <div class="code-block">
+              ${fileDiff.lines}
+            </div>
+          `;
+          
+          viewEl.appendChild(fileDiv);
+        });
+      } catch (error) {
+        viewEl.innerHTML = `<div class="loading">Error: ${error.message || error}</div>`;
+        console.error('Error rendering code view:', error);
+      }
+    }
+
+    async function parseDiffWithAttribution(diffText, trace) {
+      const lines = diffText.split('\n');
+      const files = [];
+      let currentFile = null;
+      let currentPath = null;
+      let oldLineNum = 0;
+      let newLineNum = 0;
+      let inHunk = false;
+
+      // Build attribution map from trace
+      const attributionMap = new Map(); // filePath -> Map(lineNum -> {model, type})
+      trace.files?.forEach(file => {
+        const fileMap = new Map();
+        file.conversations?.forEach(conv => {
+          conv.ranges?.forEach(range => {
+            for (let i = range.start_line; i <= range.end_line; i++) {
+              fileMap.set(i, {
+                model: conv.contributor?.model_id || 'unknown',
+                type: conv.contributor?.type || 'unknown'
+              });
+            }
+          });
+        });
+        attributionMap.set(file.path, fileMap);
+      });
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        // File header
+        if (line.startsWith('diff --git')) {
+          // Save previous file
+          if (currentFile) {
+            files.push(currentFile);
+          }
+          currentFile = { path: '', lines: [] };
+          currentPath = null;
+          oldLineNum = 0;
+          newLineNum = 0;
+          inHunk = false;
+        } else if (line.startsWith('--- a/')) {
+          // Old file path
+          const path = line.substring(6).trim();
+          if (path && path !== '/dev/null') {
+            currentPath = path;
+            if (currentFile && !currentFile.path) {
+              currentFile.path = path;
+            }
+          }
+        } else if (line.startsWith('+++ b/')) {
+          // New file path
+          const path = line.substring(6).trim();
+          if (path && path !== '/dev/null') {
+            currentPath = path;
+            if (currentFile) {
+              currentFile.path = path;
+            }
+          }
+        } else if (line.startsWith('@@')) {
+          // Hunk header: @@ -oldStart,oldCount +newStart,newCount @@
+          const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+          if (match && currentFile) {
+            oldLineNum = parseInt(match[1], 10);
+            newLineNum = parseInt(match[3], 10);
+            inHunk = true;
+            
+            // Add hunk header line
+            currentFile.lines.push({
+              type: 'hunk',
+              content: line,
+              oldNum: null,
+              newNum: null,
+              attribution: null
+            });
+          }
+        } else if (inHunk && currentFile) {
+          if (line.startsWith('+') && !line.startsWith('+++')) {
+            // Added line
+            const content = line.substring(1);
+            const attribution = currentPath ? attributionMap.get(currentPath)?.get(newLineNum) : null;
+            
+            currentFile.lines.push({
+              type: 'added',
+              content: content,
+              oldNum: null,
+              newNum: newLineNum++,
+              attribution: attribution
+            });
+          } else if (line.startsWith('-') && !line.startsWith('---')) {
+            // Removed line
+            const content = line.substring(1);
+            
+            currentFile.lines.push({
+              type: 'removed',
+              content: content,
+              oldNum: oldLineNum++,
+              newNum: null,
+              attribution: null
+            });
+          } else if (line.startsWith(' ')) {
+            // Context line (unchanged)
+            const content = line.substring(1);
+            const attribution = currentPath ? attributionMap.get(currentPath)?.get(newLineNum) : null;
+            
+            currentFile.lines.push({
+              type: 'context',
+              content: content,
+              oldNum: oldLineNum++,
+              newNum: newLineNum++,
+              attribution: attribution
+            });
+          } else {
+            // Other line (keep as-is)
+            currentFile.lines.push({
+              type: 'other',
+              content: line,
+              oldNum: null,
+              newNum: null,
+              attribution: null
+            });
+          }
+        } else if (currentFile && !inHunk) {
+          // Lines before hunk (file metadata, etc.)
+          currentFile.lines.push({
+            type: 'other',
+            content: line,
+            oldNum: null,
+            newNum: null,
+            attribution: null
+          });
+        }
+      }
+
+      // Save last file
+      if (currentFile) {
+        files.push(currentFile);
+      }
+
+      // Render lines with attribution
+      return files.map(file => ({
+        path: file.path,
+        lines: file.lines.map(lineData => {
+          const lineClass = lineData.type === 'added' ? 'added' : 
+                           lineData.type === 'removed' ? 'removed' : 
+                           lineData.type === 'hunk' ? 'hunk' : 'context';
+          
+          let attributionHtml = '';
+          if (lineData.attribution) {
+            const modelName = lineData.attribution.model.split('/').pop();
+            const badgeClass = lineData.attribution.model.includes('claude') ? 'claude' : 
+                             lineData.attribution.model.includes('gpt') ? 'gpt' : '';
+            const contributorLabel = lineData.attribution.type === 'human' ? 'Human' : modelName;
+            attributionHtml = `<div class="line-attribution ${badgeClass}">${contributorLabel}</div>`;
+          } else if (lineData.type === 'added' || lineData.type === 'removed') {
+            attributionHtml = '<div class="line-attribution">-</div>';
+          } else {
+            attributionHtml = '<div class="line-attribution"></div>';
+          }
+
+          const oldNum = lineData.oldNum !== null ? lineData.oldNum : '';
+          const newNum = lineData.newNum !== null ? lineData.newNum : '';
+          
+          return `
+            <div class="code-line diff-line ${lineClass}">
+              <div class="line-number old">${oldNum}</div>
+              <div class="line-number new">${newNum}</div>
+              <div class="line-content">${escapeHtml(lineData.content)}</div>
+              ${attributionHtml}
+            </div>
+          `;
+        }).join('')
+      }));
     }
 
     async function generateCodeLines(file) {
