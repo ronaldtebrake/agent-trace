@@ -816,8 +816,16 @@
           }
         }
         
-        // Render trace contents in a readable format
-        rawContentEl.innerHTML = traces.map((trace, index) => renderTraceContent(trace, index, commitMessage)).join('');
+        // Render trace contents as pretty-printed JSON array
+        rawContentEl.innerHTML = `
+          <div class="trace-viewer-section">
+            <h3>${commitMessage ? escapeHtml(commitMessage) : 'Trace Data'}</h3>
+            <div class="trace-viewer-field">
+              <div class="trace-viewer-label">Trace Data (JSON Array)</div>
+              <div class="trace-viewer-value json">${JSON.stringify(traces, null, 2)}</div>
+            </div>
+          </div>
+        `;
       } catch (error) {
         rawContentEl.innerHTML = `<div class="loading">Error loading trace contents: ${error.message || error}</div>`;
         console.error('Raw notes error:', error);
@@ -827,44 +835,6 @@
     function renderTraceContent(trace, index, commitMessage) {
       const date = new Date(trace.timestamp);
       const title = commitMessage || trace.metadata?.scenario || `Trace ${index + 1}: ${trace.id.substring(0, 8)}...`;
-
-      // Build array of trace entries
-      const traceEntries = [];
-      
-      trace.files?.forEach(file => {
-        file.conversations?.forEach(conv => {
-          const contributorType = conv.contributor?.type || 'unknown';
-          const modelId = conv.contributor?.model_id;
-          
-          // Only process if we have a valid contributor type
-          if (contributorType === 'unknown') return;
-          
-          let modelName = null;
-          if (contributorType === 'ai') {
-            if (modelId && typeof modelId === 'string' && modelId.trim()) {
-              const trimmedModelId = modelId.trim();
-              if (trimmedModelId.toLowerCase() === 'default') {
-                modelName = 'Auto';
-              } else if (trimmedModelId.includes('/')) {
-                const parts = trimmedModelId.split('/');
-                modelName = parts[parts.length - 1]; // Get last part after /
-              } else {
-                modelName = trimmedModelId;
-              }
-            }
-          }
-          
-          conv.ranges?.forEach(range => {
-            traceEntries.push({
-              file: file.path,
-              contributor: contributorType === 'human' ? 'Human' : 'AI',
-              model: modelName,
-              lines: `${range.start_line}-${range.end_line}`,
-              url: conv.url || null
-            });
-          });
-        });
-      });
 
       return `
         <div class="trace-viewer-section">
@@ -898,46 +868,8 @@
           ` : ''}
           
           <div class="trace-viewer-field">
-            <div class="trace-viewer-label">Attribution (${traceEntries.length} entries)</div>
-            <div style="background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; overflow: hidden;">
-              <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
-                <thead>
-                  <tr style="background: #151515; border-bottom: 1px solid #2a2a2a;">
-                    <th style="padding: 0.75rem 1rem; text-align: left; color: #888; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em;">File</th>
-                    <th style="padding: 0.75rem 1rem; text-align: left; color: #888; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em;">Contributor</th>
-                    <th style="padding: 0.75rem 1rem; text-align: left; color: #888; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em;">Model</th>
-                    <th style="padding: 0.75rem 1rem; text-align: left; color: #888; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em;">Lines</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${traceEntries.map((entry, idx) => {
-                    const rowClass = idx % 2 === 0 ? '' : 'style="background: #151515;"';
-                    let contributorBadge;
-                    if (entry.contributor === 'Human') {
-                      contributorBadge = '<span class="attribution-badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981;">Human</span>';
-                    } else if (entry.model) {
-                      contributorBadge = `<span class="attribution-badge" style="background: rgba(139, 92, 246, 0.2); color: #a78bfa;">${escapeHtml(entry.model)}</span>`;
-                    } else {
-                      contributorBadge = '<span class="attribution-badge unknown">Unknown</span>';
-                    }
-                    
-                    return `
-                      <tr ${rowClass}>
-                        <td style="padding: 0.75rem 1rem; font-family: monospace; color: #e0e0e0;">${escapeHtml(entry.file)}</td>
-                        <td style="padding: 0.75rem 1rem;">${contributorBadge}</td>
-                        <td style="padding: 0.75rem 1rem; color: #888;">${entry.model ? escapeHtml(entry.model) : '-'}</td>
-                        <td style="padding: 0.75rem 1rem; font-family: monospace; color: #888;">${entry.lines}</td>
-                      </tr>
-                    `;
-                  }).join('')}
-                  ${traceEntries.length === 0 ? `
-                    <tr>
-                      <td colspan="4" style="padding: 2rem; text-align: center; color: #888;">No attribution data</td>
-                    </tr>
-                  ` : ''}
-                </tbody>
-              </table>
-            </div>
+            <div class="trace-viewer-label">Trace Data (JSON)</div>
+            <div class="trace-viewer-value json">${JSON.stringify(trace, null, 2)}</div>
           </div>
         </div>
       `;
@@ -1088,15 +1020,33 @@
       let inHunk = false;
 
       // Build attribution map from trace
-      const attributionMap = new Map(); // filePath -> Map(lineNum -> {model, type})
+      const attributionMap = new Map(); // filePath -> Map(lineNum -> {model, modelId, type})
       trace.files?.forEach(file => {
         const fileMap = new Map();
         file.conversations?.forEach(conv => {
+          const contributorType = conv.contributor?.type || 'unknown';
+          const modelId = conv.contributor?.model_id;
+          
+          // Extract model name from model_id
+          let modelName = null;
+          if (contributorType === 'ai' && modelId && typeof modelId === 'string' && modelId.trim()) {
+            const trimmedModelId = modelId.trim();
+            if (trimmedModelId.toLowerCase() === 'default') {
+              modelName = 'Auto';
+            } else if (trimmedModelId.includes('/')) {
+              const parts = trimmedModelId.split('/');
+              modelName = parts[parts.length - 1];
+            } else {
+              modelName = trimmedModelId;
+            }
+          }
+          
           conv.ranges?.forEach(range => {
             for (let i = range.start_line; i <= range.end_line; i++) {
               fileMap.set(i, {
-                model: conv.contributor?.model_id || 'unknown',
-                type: conv.contributor?.type || 'unknown'
+                model: modelName,
+                modelId: modelId,
+                type: contributorType
               });
             }
           });
@@ -1228,32 +1178,35 @@
           let attributionHtml = '';
           if (lineData.attribution) {
             const model = lineData.attribution.model;
-            if (model && model.trim() !== '') {
-              let modelName = model.includes('/') ? model.split('/').pop() : model;
+            const modelId = lineData.attribution.modelId;
+            const contributorType = lineData.attribution.type;
+            
+            if (contributorType === 'human') {
+              attributionHtml = `
+                <div class="line-attribution" data-type="human">
+                  <span class="attribution-badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981;">Human</span>
+                </div>
+              `;
+            } else if (model) {
+              // AI with model name
               let badgeClass = '';
-              let contributorLabel = '';
-              
-              if (lineData.attribution.type === 'human') {
-                contributorLabel = 'Human';
-                badgeClass = '';
-              } else if (model.toLowerCase() === 'default') {
-                contributorLabel = 'Auto';
+              if (model.toLowerCase() === 'auto') {
                 badgeClass = 'default';
-              } else {
-                contributorLabel = modelName;
-                badgeClass = model.includes('claude') ? 'claude' : 
-                           model.includes('gpt') ? 'gpt' : 
-                           model.includes('o3') ? 'o3' : '';
+              } else if (modelId && modelId.includes('claude')) {
+                badgeClass = 'claude';
+              } else if (modelId && modelId.includes('gpt')) {
+                badgeClass = 'gpt';
+              } else if (modelId && modelId.includes('o3')) {
+                badgeClass = 'o3';
               }
               
-              const contributorType = lineData.attribution.type === 'human' ? 'human' : 'ai';
               attributionHtml = `
-                <div class="line-attribution ${badgeClass}" data-type="${contributorType}">
-                  <span class="attribution-badge">${contributorLabel}</span>
+                <div class="line-attribution ${badgeClass}" data-type="ai">
+                  <span class="attribution-badge" style="background: rgba(139, 92, 246, 0.2); color: #a78bfa;">${escapeHtml(model)}</span>
                 </div>
               `;
             } else {
-              // No model info - show as unknown
+              // AI but no model info - show as unknown
               attributionHtml = '<div class="line-attribution"><span class="attribution-badge unknown">Unknown</span></div>';
             }
           } else if (lineData.type === 'added') {
