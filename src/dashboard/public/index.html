@@ -409,6 +409,95 @@
       overflow-x: auto;
     }
 
+    .trace-viewer {
+      padding: 1.5rem;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      overflow-x: auto;
+    }
+
+    .trace-viewer-section {
+      margin-bottom: 2rem;
+      background: #151515;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      padding: 1.5rem;
+    }
+
+    .trace-viewer-section h3 {
+      font-size: 1rem;
+      color: #fff;
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid #2a2a2a;
+    }
+
+    .trace-viewer-field {
+      margin-bottom: 1rem;
+    }
+
+    .trace-viewer-label {
+      font-size: 0.75rem;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.25rem;
+    }
+
+    .trace-viewer-value {
+      font-size: 0.875rem;
+      color: #e0e0e0;
+      font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    }
+
+    .trace-viewer-value.json {
+      background: #1a1a1a;
+      padding: 1rem;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
+
+    .trace-file-item {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 6px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .trace-file-path {
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 0.75rem;
+    }
+
+    .trace-conversation-item {
+      background: #151515;
+      border-left: 3px solid #2a2a2a;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.75rem;
+      margin-left: 1rem;
+    }
+
+    .trace-conversation-item.ai {
+      border-left-color: #8b5cf6;
+    }
+
+    .trace-conversation-item.human {
+      border-left-color: #10b981;
+    }
+
+    .trace-range-item {
+      display: inline-block;
+      background: #2a2a2a;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      margin-right: 0.5rem;
+      margin-bottom: 0.25rem;
+      font-size: 0.75rem;
+      font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+    }
+
     .diff-content {
       padding: 1.5rem;
       font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
@@ -496,8 +585,8 @@
         </div>
         
         <div class="tab-content" id="tab-raw">
-          <div class="raw-content" id="raw-content">
-            <div class="loading">Select a trace record to view raw notes</div>
+          <div class="trace-viewer" id="raw-content">
+            <div class="loading">Select a trace record to view trace contents</div>
           </div>
         </div>
         
@@ -687,61 +776,127 @@
     }
 
     async function loadRawNotes() {
-      // Get commit SHA from trace's _commitSha (attached when loading) or vcs.revision
-      const commitSha = selectedTrace?._commitSha || selectedTrace?.vcs?.revision;
+      const rawContentEl = document.getElementById('raw-content');
       
-      if (!commitSha) {
-        document.getElementById('raw-content').textContent = 'No commit SHA available';
+      if (!selectedTrace) {
+        rawContentEl.innerHTML = '<div class="loading">No trace selected</div>';
         return;
       }
       
-      const rawContentEl = document.getElementById('raw-content');
-      rawContentEl.textContent = 'Loading...';
+      rawContentEl.innerHTML = '<div class="loading">Loading trace contents...</div>';
       
       try {
-        // Clean commit SHA (remove any trailing dots or extra characters)
-        const cleanSha = commitSha.split('.')[0].trim();
-        const url = `${API_BASE}/commits/${cleanSha}/raw-notes`;
+        // Get commit SHA to fetch all traces for this commit
+        const commitSha = selectedTrace?._commitSha || selectedTrace?.vcs?.revision;
         
-        console.log('Fetching raw notes from:', url);
-        const res = await fetch(url);
-        const contentType = res.headers.get('content-type') || '';
+        let traces = [selectedTrace];
         
-        if (!res.ok) {
-          const errorText = await res.text();
-          let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
+        // If we have a commit SHA, try to fetch all traces for that commit
+        if (commitSha) {
           try {
-            const errorJson = JSON.parse(errorText);
-            errorMsg = errorJson.error || errorJson.message || errorMsg;
-          } catch {
-            if (errorText) errorMsg += `\n${errorText}`;
+            const cleanSha = commitSha.split('.')[0].trim();
+            const res = await fetch(`${API_BASE}/commits/${cleanSha}/traces`);
+            if (res.ok) {
+              const commitTraces = await res.json();
+              if (commitTraces && commitTraces.length > 0) {
+                traces = commitTraces;
+              }
+            }
+          } catch (error) {
+            console.warn('Could not fetch all traces for commit, using selected trace only:', error);
           }
-          rawContentEl.textContent = `Error: ${errorMsg}`;
-          console.error('Raw notes fetch error:', errorMsg);
-          return;
         }
         
-        const rawNotes = await res.text();
-        
-        if (!rawNotes || rawNotes.trim() === '') {
-          rawContentEl.textContent = 'No notes found for this commit';
-          return;
-        }
-        
-        // Try to format as JSON if possible
-        let formatted = rawNotes;
-        try {
-          const parsed = JSON.parse(rawNotes);
-          formatted = JSON.stringify(parsed, null, 2);
-        } catch {
-          // Not JSON, use as-is
-        }
-        
-        rawContentEl.textContent = formatted;
+        // Render trace contents in a readable format
+        rawContentEl.innerHTML = traces.map((trace, index) => renderTraceContent(trace, index)).join('');
       } catch (error) {
-        rawContentEl.textContent = `Error loading raw notes: ${error.message || error}`;
+        rawContentEl.innerHTML = `<div class="loading">Error loading trace contents: ${error.message || error}</div>`;
         console.error('Raw notes error:', error);
       }
+    }
+
+    function renderTraceContent(trace, index) {
+      const date = new Date(trace.timestamp);
+      const modelBadges = new Set();
+      let totalRanges = 0;
+      
+      trace.files?.forEach(file => {
+        file.conversations?.forEach(conv => {
+          if (conv.contributor?.model_id) {
+            const model = conv.contributor.model_id.toLowerCase() === 'default' ? 'Auto' : conv.contributor.model_id;
+            modelBadges.add(model);
+          }
+          totalRanges += conv.ranges?.length || 0;
+        });
+      });
+
+      return `
+        <div class="trace-viewer-section">
+          <h3>Trace ${index + 1}: ${trace.id.substring(0, 8)}...</h3>
+          
+          <div class="trace-viewer-field">
+            <div class="trace-viewer-label">Timestamp</div>
+            <div class="trace-viewer-value">${date.toLocaleString()}</div>
+          </div>
+          
+          <div class="trace-viewer-field">
+            <div class="trace-viewer-label">VCS</div>
+            <div class="trace-viewer-value">${trace.vcs?.type || 'N/A'} @ ${trace.vcs?.revision?.substring(0, 12) || 'N/A'}</div>
+          </div>
+          
+          <div class="trace-viewer-field">
+            <div class="trace-viewer-label">Tool</div>
+            <div class="trace-viewer-value">${trace.tool?.name || 'N/A'} ${trace.tool?.version ? `v${trace.tool.version}` : ''}</div>
+          </div>
+          
+          ${trace.metadata ? `
+          <div class="trace-viewer-field">
+            <div class="trace-viewer-label">Metadata</div>
+            <div class="trace-viewer-value json">${JSON.stringify(trace.metadata, null, 2)}</div>
+          </div>
+          ` : ''}
+          
+          <div class="trace-viewer-field">
+            <div class="trace-viewer-label">Files (${trace.files?.length || 0})</div>
+            ${trace.files?.map(file => `
+              <div class="trace-file-item">
+                <div class="trace-file-path">${escapeHtml(file.path)}</div>
+                ${file.conversations?.map(conv => {
+                  const modelId = conv.contributor?.model_id || 'unknown';
+                  const modelName = modelId.toLowerCase() === 'default' ? 'Auto' : modelId.split('/').pop();
+                  const contributorType = conv.contributor?.type || 'unknown';
+                  const badgeClass = contributorType === 'human' ? 'human' : 'ai';
+                  
+                  return `
+                    <div class="trace-conversation-item ${badgeClass}">
+                      <div style="margin-bottom: 0.5rem;">
+                        <strong>Contributor:</strong> ${contributorType === 'human' ? 'Human' : 'AI'}
+                        ${modelId && modelId !== 'unknown' && modelId !== 'default' ? ` (${modelName})` : modelId === 'default' ? ' (Auto)' : ''}
+                      </div>
+                      ${conv.url ? `<div style="margin-bottom: 0.5rem; font-size: 0.75rem; color: #888;">URL: ${escapeHtml(conv.url)}</div>` : ''}
+                      <div style="margin-bottom: 0.5rem;">
+                        <strong>Ranges:</strong>
+                        <div style="margin-top: 0.5rem;">
+                          ${conv.ranges?.map(range => `
+                            <span class="trace-range-item">
+                              Lines ${range.start_line}-${range.end_line}
+                            </span>
+                          `).join('') || 'No ranges'}
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('') || '<div style="color: #888;">No conversations</div>'}
+              </div>
+            `).join('') || '<div style="color: #888;">No files</div>'}
+          </div>
+          
+          <div class="trace-viewer-field">
+            <div class="trace-viewer-label">Raw JSON</div>
+            <div class="trace-viewer-value json">${JSON.stringify(trace, null, 2)}</div>
+          </div>
+        </div>
+      `;
     }
 
     async function loadDiff() {
