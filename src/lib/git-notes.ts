@@ -202,12 +202,17 @@ export function writeTracesToNotes(
     const errorMsg = proc.stderr?.toString() || proc.stdout?.toString() || "unknown error";
     
     // If it's a broken ref error, try to fix it
-    if (errorMsg.includes("Failed to read notes tree")) {
+    if (errorMsg.includes("Failed to read notes tree") || 
+        errorMsg.includes("not a commit") ||
+        errorMsg.includes("Failed to find/parse commit")) {
       try {
+        // Delete the broken ref
         execFileSync("git", ["update-ref", "-d", NOTES_REF], {
           stdio: "ignore",
           cwd,
         });
+        
+        // Recreate it properly
         ensureNotesRef(cwd);
         
         // Retry once
@@ -224,8 +229,32 @@ export function writeTracesToNotes(
         if (retryProc.status === 0) {
           return; // Success on retry
         }
-      } catch {
-        // Fall through to throw error
+      } catch (retryError) {
+        // If retry fails, try one more time with a fresh ref
+        try {
+          // Delete and let git notes create it fresh
+          execFileSync("git", ["update-ref", "-d", NOTES_REF], {
+            stdio: "ignore",
+            cwd,
+          });
+          
+          // Try adding the note directly - git will create the ref
+          const finalProc = spawnSync(
+            "git",
+            ["notes", "--ref", NOTES_REF, "add", "-f", "-F", "-", commitSha],
+            {
+              input: content,
+              encoding: "utf-8",
+              cwd,
+            }
+          );
+          
+          if (finalProc.status === 0) {
+            return; // Success
+          }
+        } catch {
+          // Fall through to throw error
+        }
       }
     }
     
@@ -417,36 +446,83 @@ export function ensureNotesRef(cwd?: string): void {
       stdio: "ignore",
       cwd,
     });
-    // Ref exists and is valid
-    return;
-  } catch {
-    // Ref doesn't exist, create it properly
+    // Ref exists and is valid - verify it's actually usable
     try {
-      execFileSync("git", ["rev-parse", "HEAD"], { stdio: "ignore", cwd });
-      // HEAD exists, create ref by adding a dummy note then removing it
-      execFileSync(
-        "git",
-        ["notes", "--ref", NOTES_REF, "add", "-m", "init", "HEAD"],
-        { stdio: "ignore", cwd }
-      );
-      execFileSync(
-        "git",
-        ["notes", "--ref", NOTES_REF, "remove", "HEAD"],
-        { stdio: "ignore", cwd }
-      );
+      execFileSync("git", ["notes", "--ref", NOTES_REF, "list"], {
+        stdio: "ignore",
+        cwd,
+      });
+      // Ref is valid and usable
+      return;
     } catch {
-      // HEAD doesn't exist yet, create empty tree ref
-      const emptyTree = execFileSync(
-        "git",
-        ["mktree"],
-        { input: "", encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"], cwd }
-      ).trim();
-      if (emptyTree) {
-        execFileSync("git", ["update-ref", NOTES_REF, emptyTree], {
+      // Ref exists but is broken - delete and recreate
+      try {
+        execFileSync("git", ["update-ref", "-d", NOTES_REF], {
           stdio: "ignore",
           cwd,
         });
+      } catch {
+        // Ignore deletion errors
       }
+      // Fall through to creation below
     }
+  } catch {
+    // Ref doesn't exist, create it properly
+  }
+  
+  // Create the ref properly - git notes needs a commit, not a tree
+  try {
+    // Check if HEAD exists
+    let headSha: string;
+    try {
+      headSha = execFileSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "ignore"],
+        cwd,
+      }).trim();
+    } catch {
+      // No HEAD - can't create notes ref yet, but that's OK
+      // The ref will be created automatically when we add the first note
+      return;
+    }
+    
+    // HEAD exists, create ref by adding a dummy note then removing it
+    // This properly initializes the notes ref
+    try {
+      execFileSync(
+        "git",
+        ["notes", "--ref", NOTES_REF, "add", "-m", "init", headSha],
+        { stdio: "ignore", cwd }
+      );
+      execFileSync(
+        "git",
+        ["notes", "--ref", NOTES_REF, "remove", headSha],
+        { stdio: "ignore", cwd }
+      );
+    } catch {
+      // If that fails, try creating an empty commit-based ref
+      // Get the commit object SHA
+      const commitTree = execFileSync(
+        "git",
+        ["rev-parse", `${headSha}^{tree}`],
+        { encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"], cwd }
+      ).trim();
+      
+      // Create a commit object pointing to this tree
+      const commitSha = execFileSync(
+        "git",
+        ["commit-tree", "-m", "init", commitTree],
+        { encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"], cwd }
+      ).trim();
+      
+      // Create ref pointing to this commit
+      execFileSync("git", ["update-ref", NOTES_REF, commitSha], {
+        stdio: "ignore",
+        cwd,
+      });
+    }
+  } catch {
+    // If all else fails, just return - git notes add will handle it
+    // The ref will be created automatically when we add the first note
   }
 }
