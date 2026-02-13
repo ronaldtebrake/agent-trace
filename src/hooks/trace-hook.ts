@@ -36,15 +36,25 @@ interface HookInput {
   cwd?: string;
 }
 
+// Determine contributor type: if model is undefined/null, it's human; otherwise AI
+function getContributorType(input: HookInput): "ai" | "human" {
+  // If model is missing/undefined/null, assume human edit
+  if (!input.model || input.model.trim() === "") {
+    return "human";
+  }
+  return "ai";
+}
+
 const handlers: Record<string, (input: HookInput) => void> = {
   afterFileEdit: (input) => {
     if (!input.file_path) return;
+    const contributorType = getContributorType(input);
     const rangePositions = computeRangePositions(
       input.edits ?? [],
       tryReadFile(input.file_path)
     );
     appendTrace(
-      createTrace("ai", input.file_path, {
+      createTrace(contributorType, input.file_path, {
         model: input.model,
         rangePositions,
         transcript: input.transcript_path,
@@ -58,9 +68,10 @@ const handlers: Record<string, (input: HookInput) => void> = {
 
   afterTabFileEdit: (input) => {
     if (!input.file_path) return;
+    const contributorType = getContributorType(input);
     const rangePositions = computeRangePositions(input.edits ?? []);
     appendTrace(
-      createTrace("ai", input.file_path, {
+      createTrace(contributorType, input.file_path, {
         model: input.model,
         rangePositions,
         metadata: {
@@ -72,8 +83,9 @@ const handlers: Record<string, (input: HookInput) => void> = {
   },
 
   afterShellExecution: (input) => {
+    const contributorType = getContributorType(input);
     appendTrace(
-      createTrace("ai", ".shell-history", {
+      createTrace(contributorType, ".shell-history", {
         model: input.model,
         transcript: input.transcript_path,
         metadata: {
@@ -123,6 +135,7 @@ const handlers: Record<string, (input: HookInput) => void> = {
 
     if (!isFileEdit && !isBash) return;
 
+    const contributorType = getContributorType(input);
     const file = isBash
       ? ".shell-history"
       : input.tool_input?.file_path ?? ".unknown";
@@ -141,7 +154,7 @@ const handlers: Record<string, (input: HookInput) => void> = {
         : undefined;
 
     appendTrace(
-      createTrace("ai", file, {
+      createTrace(contributorType, file, {
         model: input.model,
         rangePositions,
         transcript: input.transcript_path,

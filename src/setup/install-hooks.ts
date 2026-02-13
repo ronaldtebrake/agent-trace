@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from "fs";
 import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
@@ -45,12 +45,28 @@ function getHookScriptPath(): string {
   const srcPath = resolve(__dirname, "../hooks/trace-hook.ts");
   
   if (existsSync(distPath)) {
+    // Make executable
+    try {
+      chmodSync(distPath, 0o755);
+    } catch (error) {
+      // Ignore if chmod fails (e.g., on Windows)
+    }
     return distPath;
   }
   if (existsSync(srcPath)) {
     return srcPath;
   }
   // Fallback: assume it's installed and use node to run it
+  // Try to find it in node_modules and make it executable
+  const nodeModulesPath = join(process.cwd(), "node_modules", "agent-trace-cli", "dist", "hooks", "trace-hook.js");
+  if (existsSync(nodeModulesPath)) {
+    try {
+      chmodSync(nodeModulesPath, 0o755);
+    } catch (error) {
+      // Ignore if chmod fails (e.g., on Windows)
+    }
+    return nodeModulesPath;
+  }
   return "node node_modules/agent-trace-cli/dist/hooks/trace-hook.js";
 }
 

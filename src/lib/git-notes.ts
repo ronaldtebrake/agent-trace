@@ -1,8 +1,104 @@
 import { execFileSync, spawnSync } from "child_process";
 import { z } from "zod";
 import { TraceRecordSchema, type TraceRecord } from "./schemas.js";
+import type { Conversation } from "./types.js";
 
 const NOTES_REF = "refs/notes/agent-trace";
+
+/**
+ * Consolidate multiple traces into fewer trace records by merging:
+ * - Traces with the same conversation_id
+ * - File edits from the same file in the same trace
+ */
+function consolidateTraces(traces: TraceRecord[]): TraceRecord[] {
+  if (traces.length <= 1) {
+    return traces;
+  }
+
+  // Group traces by conversation_id (or create a group for traces without one)
+  const groups = new Map<string, TraceRecord[]>();
+  
+  for (const trace of traces) {
+    // Use conversation_id from first file's first conversation, or "no-conversation" as key
+    const conversationId = trace.files[0]?.conversations[0]?.url || 
+                           trace.metadata?.conversation_id as string || 
+                           "no-conversation";
+    
+    if (!groups.has(conversationId)) {
+      groups.set(conversationId, []);
+    }
+    groups.get(conversationId)!.push(trace);
+  }
+
+  const consolidated: TraceRecord[] = [];
+
+  for (const [conversationId, groupTraces] of groups.entries()) {
+    if (groupTraces.length === 1) {
+      consolidated.push(groupTraces[0]);
+      continue;
+    }
+
+    // Merge traces in this group
+    // Use the first trace as the base
+    const baseTrace = groupTraces[0];
+    
+    // Collect all files from all traces
+    const fileMap = new Map<string, {
+      path: string;
+      conversations: Conversation[];
+    }>();
+
+    for (const trace of groupTraces) {
+      for (const file of trace.files) {
+        if (!fileMap.has(file.path)) {
+          fileMap.set(file.path, {
+            path: file.path,
+            conversations: [],
+          });
+        }
+        
+        // Merge conversations for this file
+        const fileEntry = fileMap.get(file.path)!;
+        for (const conv of file.conversations) {
+          // Check if conversation already exists (same contributor and ranges)
+          const existing = fileEntry.conversations.find(
+            (c) =>
+              c.contributor?.type === conv.contributor?.type &&
+              c.contributor?.model_id === conv.contributor?.model_id
+          );
+          
+          if (existing) {
+            // Merge ranges
+            const existingRanges = new Set(
+              existing.ranges.map((r) => `${r.start_line}-${r.end_line}`)
+            );
+            for (const range of conv.ranges) {
+              const rangeKey = `${range.start_line}-${range.end_line}`;
+              if (!existingRanges.has(rangeKey)) {
+                existing.ranges.push(range);
+                existingRanges.add(rangeKey);
+              }
+            }
+          } else {
+            fileEntry.conversations.push(conv);
+          }
+        }
+      }
+    }
+
+    // Create consolidated trace
+    const consolidatedTrace: TraceRecord = {
+      ...baseTrace,
+      id: baseTrace.id, // Keep first trace's ID
+      timestamp: baseTrace.timestamp, // Keep earliest timestamp
+      files: Array.from(fileMap.values()),
+    };
+
+    consolidated.push(consolidatedTrace);
+  }
+
+  return consolidated;
+}
 
 /**
  * Read trace records from git notes for a specific commit
@@ -69,8 +165,11 @@ export function writeTracesToNotes(
   const newTraces = traces.filter((t) => !existingIds.has(t.id));
   const allTraces = [...existing, ...newTraces];
 
+  // Consolidate traces: merge traces with same conversation_id and file
+  const consolidated = consolidateTraces(allTraces);
+
   // Store as JSON array
-  const content = JSON.stringify(allTraces, null, 2);
+  const content = JSON.stringify(consolidated, null, 2);
 
   // Ensure notes ref is valid before writing
   try {
