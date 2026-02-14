@@ -12,10 +12,8 @@ import type {
 } from "./types.js";
 import { TraceRecordSchema } from "./schemas.js";
 import {
-  appendTraceToNotes,
   readTracesFromNotes,
   getCommitsWithTraces,
-  ensureNotesRef,
 } from "./git-notes.js";
 
 const STAGING_PATH = ".agent-trace/staging.jsonl";
@@ -150,26 +148,12 @@ export function createTrace(
 
 export function appendTrace(trace: TraceRecord): void {
   const root = getWorkspaceRoot();
-  ensureNotesRef(root);
-  
-  let commitSha: string;
-  
-  try {
-    commitSha = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: root,
-      encoding: "utf-8",
-    }).trim();
-    
-    // Append trace to git notes for current commit
-    appendTraceToNotes(commitSha, trace, root);
-  } catch {
-    // Not in a git repo or no commits yet - store in staging area
-    // This will be attached to the commit when it's created
-    const stagingPath = join(root, STAGING_PATH);
-    const dir = join(root, ".agent-trace");
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    appendFileSync(stagingPath, JSON.stringify(trace) + "\n", "utf-8");
-  }
+  // Always write to staging area so post-commit hook can attach to the new commit.
+  // This ensures traces are attached to the commit being created, not the previous HEAD.
+  const stagingPath = join(root, STAGING_PATH);
+  const dir = join(root, ".agent-trace");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  appendFileSync(stagingPath, JSON.stringify(trace) + "\n", "utf-8");
 }
 
 export function readTraces(root?: string, commitSha?: string): TraceRecord[] {

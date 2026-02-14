@@ -1,4 +1,5 @@
 import { execFileSync } from "child_process";
+import { readFileSync, existsSync } from "fs";
 import type { TraceRecord } from "../lib/types.js";
 import {
   readTracesFromNotes,
@@ -282,45 +283,44 @@ export function getRawNotes(commitSha: string): string {
 /**
  * Get git diff for a commit
  */
+const GIT_DIFF_MAX_BUFFER = 10 * 1024 * 1024; // 10MB for large diffs (e.g. initial commit)
+const GIT_STDIO = { encoding: "utf-8" as const, stdio: ["pipe", "pipe", "ignore"] as const };
+
 export function getCommitDiff(commitSha: string): string {
-  const root = getWorkspaceRoot();
+  let root: string;
   try {
-    // Try to resolve the commit SHA first (handles short SHAs)
+    root = getWorkspaceRoot();
+  } catch {
+    root = process.cwd();
+  }
+  const opts = { cwd: root, ...GIT_STDIO, maxBuffer: GIT_DIFF_MAX_BUFFER };
+  try {
     let resolvedSha = commitSha;
     try {
       resolvedSha = execFileSync(
         "git",
         ["rev-parse", commitSha],
-        { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+        { ...opts, maxBuffer: 1024 * 1024 }
       ).trim();
     } catch {
       throw new Error(`Commit not found: ${commitSha}`);
     }
-    
-    // Get parent commit
     let parentSha: string;
     try {
       parentSha = execFileSync(
         "git",
         ["rev-parse", `${resolvedSha}^`],
-        { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+        { ...opts, maxBuffer: 1024 * 1024 }
       ).trim();
     } catch {
-      // If no parent (initial commit), show diff against empty tree
-      const diff = execFileSync(
+      // Initial commit: no parent; use git show to get full diff
+      return execFileSync(
         "git",
         ["show", resolvedSha, "--format="],
-        { cwd: root, encoding: "utf-8" }
+        opts
       );
-      return diff;
     }
-    
-    const diff = execFileSync(
-      "git",
-      ["diff", parentSha, resolvedSha],
-      { cwd: root, encoding: "utf-8" }
-    );
-    return diff;
+    return execFileSync("git", ["diff", parentSha, resolvedSha], opts);
   } catch (error: any) {
     throw new Error(`Could not get diff for commit ${commitSha}: ${error.message || error}`);
   }
@@ -356,6 +356,33 @@ export function getCommitMessage(commitSha: string): string {
 }
 
 /**
+ * Get list of files changed in a commit (from git diff)
+ */
+export function getCommitFiles(commitSha: string): string[] {
+  const root = getWorkspaceRoot();
+  try {
+    let resolvedSha = commitSha;
+    try {
+      resolvedSha = execFileSync(
+        "git",
+        ["rev-parse", commitSha],
+        { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+      ).trim();
+    } catch {
+      return [];
+    }
+    const output = execFileSync(
+      "git",
+      ["diff-tree", "--no-commit-id", "--name-only", "-r", resolvedSha],
+      { cwd: root, encoding: "utf-8", stdio: ["pipe", "pipe", "ignore"] }
+    ).trim();
+    return output ? output.split("\n").filter((p) => p.trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Get file content at a specific commit
  */
 export function getFileContent(commitSha: string, filePath: string): string {
@@ -385,4 +412,85 @@ export function getFileContent(commitSha: string, filePath: string): string {
     }
     throw new Error(`Could not read file ${filePath} at commit ${commitSha}: ${error.message || error}`);
   }
+}
+
+export interface TranscriptMessage {
+  role: string;
+  content: string;
+}
+
+/**
+ * Read and parse transcript file
+ */
+export function getTranscriptContent(transcriptUrl: string): TranscriptMessage[] | null {
+  try {
+    if (transcriptUrl.startsWith("file://")) {
+      let filePath = transcriptUrl.replace(/^file:\/\//, "");
+      try {
+        filePath = decodeURIComponent(filePath);
+      } catch {
+        // use original path
+      }
+      if (existsSync(filePath)) {
+        const content = readFileSync(filePath, "utf-8");
+        return parseTranscript(content);
+      }
+      console.error(`Transcript file not found: ${filePath}`);
+    }
+    return null;
+  } catch (error) {
+    console.error("Error reading transcript:", error, "URL:", transcriptUrl);
+    return null;
+  }
+}
+
+/**
+ * Parse transcript content into user/assistant messages.
+ * Supports both JSONL format and plain text format.
+ */
+function parseTranscript(content: string): TranscriptMessage[] {
+  const messages: TranscriptMessage[] = [];
+  const lines = content.split("\n").filter((line) => line.trim());
+
+  if (lines.length > 0 && lines[0].trim().startsWith("{")) {
+    for (const line of lines) {
+      try {
+        const obj = JSON.parse(line) as { role?: string; message?: { content?: Array<{ type?: string; text?: string }> } };
+        if (obj.role && obj.message?.content) {
+          let textParts = obj.message.content
+            .filter((item) => item.type === "text")
+            .map((item) => item.text ?? "")
+            .join("\n")
+            .trim();
+          textParts = textParts.replace(/<user_query>\s*/gi, "").replace(/\s*<\/user_query>/gi, "");
+          if (textParts) {
+            messages.push({ role: obj.role, content: textParts });
+          }
+        }
+      } catch {
+        // skip invalid JSON lines
+      }
+    }
+    if (messages.length > 0) return messages;
+  }
+
+  let currentRole: string | null = null;
+  const currentContent: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("user:") || line.startsWith("assistant:")) {
+      if (currentRole && currentContent.length > 0) {
+        messages.push({ role: currentRole, content: currentContent.join("\n").trim() });
+      }
+      currentRole = line.startsWith("user:") ? "user" : "assistant";
+      const rest = line.substring(line.indexOf(":") + 1).trim();
+      currentContent.length = 0;
+      if (rest) currentContent.push(rest);
+    } else if (currentRole) {
+      currentContent.push(line);
+    }
+  }
+  if (currentRole && currentContent.length > 0) {
+    messages.push({ role: currentRole, content: currentContent.join("\n").trim() });
+  }
+  return messages;
 }

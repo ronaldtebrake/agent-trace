@@ -3,7 +3,7 @@ import { parse } from "url";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { getDashboardStats, getCommitTraces, getFileAttribution, getRawNotes, getCommitDiff, getFileContent, getCommitMessage } from "./api.js";
+import { getDashboardStats, getCommitTraces, getFileAttribution, getRawNotes, getCommitDiff, getCommitFiles, getFileContent, getCommitMessage, getTranscriptContent } from "./api.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -93,6 +93,16 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Not found", message: error.message }));
       }
+    } else if (path.match(/^\/api\/commits\/[^/]+\/files$/)) {
+      const commitSha = path.split("/")[3];
+      try {
+        const files = getCommitFiles(commitSha);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(files));
+      } catch (error: any) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error", message: error.message }));
+      }
     } else if (path.startsWith("/api/commits/") && path.includes("/files/")) {
       // /api/commits/{sha}/files/{path}
       const parts = path.split("/");
@@ -131,6 +141,32 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
       } catch (error: any) {
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Not found", message: error.message || `Diff not found for commit ${commitSha}` }));
+      }
+    } else if (path.startsWith("/api/transcript")) {
+      const urlObj = parse(req.url || "", true);
+      let transcriptUrl = urlObj.query?.url;
+      if (!transcriptUrl || typeof transcriptUrl !== "string") {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid request", message: "Transcript URL required" }));
+        return;
+      }
+      try {
+        transcriptUrl = decodeURIComponent(transcriptUrl);
+      } catch {
+        // use original
+      }
+      try {
+        const messages = getTranscriptContent(transcriptUrl);
+        if (messages === null) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Not found", message: `Transcript file not found: ${transcriptUrl}` }));
+        } else {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(messages));
+        }
+      } catch (error: any) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal error", message: error.message }));
       }
     } else if (path === "/api/health") {
       res.writeHead(200, { "Content-Type": "application/json" });

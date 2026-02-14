@@ -74,6 +74,10 @@ export function attachStagingTraces(): void {
     try {
       const parsed = JSON.parse(line);
       const trace = TraceRecordSchema.parse(parsed);
+      // Update vcs.revision to match the commit we're attaching to
+      if (trace.vcs) {
+        trace.vcs.revision = commitSha;
+      }
       traces.push(trace);
     } catch (error) {
       console.warn(`Failed to parse staging trace: ${error}`);
