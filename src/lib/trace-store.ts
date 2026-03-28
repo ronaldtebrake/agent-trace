@@ -117,7 +117,7 @@ export function createTrace(
   const root = getWorkspaceRoot();
   const modelId = normalizeModelId(opts.model);
   const conversationUrl = opts.transcript
-    ? `file://${opts.transcript}`
+    ? `file://${toRelativePath(opts.transcript, root)}`
     : undefined;
 
   const ranges: Range[] = opts.rangePositions?.length

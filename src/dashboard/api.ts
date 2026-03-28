@@ -1,5 +1,6 @@
 import { execFileSync } from "child_process";
 import { readFileSync, existsSync } from "fs";
+import { join } from "path";
 import type { TraceRecord } from "../lib/types.js";
 import {
   readTracesFromNotes,
@@ -430,6 +431,11 @@ export function getTranscriptContent(transcriptUrl: string): TranscriptMessage[]
         filePath = decodeURIComponent(filePath);
       } catch {
         // use original path
+      }
+      // If path is relative, resolve against workspace root
+      const root = getWorkspaceRoot();
+      if (filePath && !filePath.startsWith("/") && !/^[A-Za-z]:[/\\]/.test(filePath)) {
+        filePath = join(root, filePath);
       }
       if (existsSync(filePath)) {
         const content = readFileSync(filePath, "utf-8");
